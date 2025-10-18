@@ -1,0 +1,48 @@
+/* Operating system definitions for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#ifndef _os_defs_h
+#define _os_defs_h
+
+/* Old versions of DDE don't have headers for OSBytes, SWI reason codes etc.
+ * Define the ones that we use here instead.
+ */
+
+/* OSBytes */
+#define OSByte_ReadCMOS 161
+#define OSByte_WriteCMOS 162
+#define OsByte_OSVersionIdentifier 129
+
+/* OS_Memory reason codes */
+#define OSMemReason_IOSpace 9
+
+/* Reason codes for DCIDriverStatus service calls */
+#define DCIDriver_Starting 0
+#define DCIDriver_Terminating 1
+
+/* Reason codes for DCIProtocolStatus service calls */
+#define DCIProto_Starting 0
+#define DCIProto_Terminating 1
+
+/* Flags for DCIDriver_Stats SWI */
+#define DCIDriverStats_GetSupported (0 << 0)
+#define DCIDriverStats_GetStats (1 << 0)
+#define DCIDriverStats_GetENCStats (1 << 1)
+#define DCIDriverStats_1stReserved (1 << 2)
+
+#endif

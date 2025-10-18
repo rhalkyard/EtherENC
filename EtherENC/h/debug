@@ -1,0 +1,57 @@
+/* Debug helpers for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#ifndef _debug_h
+#define _debug_h
+
+#if !defined(DEBUG) && (defined(TXDBG) || defined(RXDBG) || defined(IRQDBG))
+#define DEBUG
+#endif
+
+#ifdef DEBUG
+#define DBGLOG(x) xsyslogf x
+#define DBGDATA(logname, priority, data, size, offset) \
+	xsyslog_logdata(logname, priority, data, size, offset)
+#define DBGIRQ(mode) xsyslog_irqmode(mode)
+#define LADEBUG
+#else
+#define DBGLOG(x)
+#define DBGDATA(logname, priority, data, size, offset)
+#define DBGIRQ(mode)
+#endif
+
+#ifdef LADEBUG
+#define DBGLA(addr, data) (addr) = (data) | ((data) << 16)
+#else
+#define DBGLA(addr, data)
+#endif
+
+#define DBG_IRQENTER 0x0000
+#define DBG_IRQLEAVE 0x0001
+#define DBG_IOFF 0x0100
+#define DBG_ION 0x0102
+#define DBG_TXSTART 0x0200
+#define DBG_TXDONE 0x0201
+#define DBG_RXSTART 0x3000
+#define DBG_RXPROTO 0x0301
+#define DBG_RXDONE 0x0302
+#define DBG_MEMTEST_START 0x0400
+#define DBG_MEMTEST_PASS 0x0401
+#define DBG_MEMTEST_FAIL 0x0402
+
+#endif

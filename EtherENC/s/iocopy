@@ -1,0 +1,241 @@
+; I/O routines for EtherENC driver for RISC OS
+;
+; Copyright (C) 2025 Richard Halkyard
+; Copyright (C) 2000 Pace Micro Technology plc
+;
+; This program is free software: you can redistribute it and/or modify it under
+; the terms of the GNU General Public License as published by the Free Software
+; Foundation, either version 3 of the License, or (at your option) any later
+; version.
+;
+; This program is distributed in the hope that it will be useful, but WITHOUT
+; ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+; FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+; details.
+;
+; You should have received a copy of the GNU General Public License along with
+; this program.  If not, see <https://www.gnu.org/licenses/>.
+
+; Modified from s.iocopy from the Ether1 driver source at
+; https://gitlab.riscosopen.org/RiscOS/Sources/Networking/Ethernet/Ether1
+
+;
+; Macro JoinHWords
+;
+; Join the low 16 bits of registers $lo and $hi into a 32 bit word in register $dst
+        MACRO
+$label  JoinHWords $dst,$lo,$hi
+$label  BIC $lo,$lo,#&00FF0000
+        BIC $lo,$lo,#&FF000000
+        ORR $dst,$lo,$hi,LSL #16
+        MEND
+;
+;
+;--------------------------------------------------------------------------
+;
+; Macro SplitWord
+;
+; Split a 32-bit word in register $hi into the low 16 bits of registers $lo and $hi
+        MACRO
+$label  SplitWord $lo,$hi
+$label  MOV $lo,$hi,LSL #16
+        MEND
+;
+;
+;--------------------------------------------------------------------------
+
+        EXPORT copy_io_in
+        EXPORT copy_io_out
+        IMPORT |_Mod$Reloc$Off|
+        IMPORT memc1a_flag
+
+        AREA    iocopy,PIC,CODE,READONLY
+
+; These routines copy bulk data in and out of a 16-bit-wide device - in this
+; case the ENC624J600's buffer memory, mapped into MEMC podule space. LDM and
+; STM are used where possible (in blocks of 16 bytes) as a performance
+; optimisation.
+;
+; We have to do some shenanigans here since the original MEMC1 can't do
+; back-to-back I/O cycles (i.e. LDM/STM to I/O addresses). On the C side, we
+; read a RISC OS flag byte at &112, bit 0 of which indicates the MEMC revision
+; (0 for MEMC1, 1 for MEMC1a). On RISC OS 3.5 and newer, this flag does not
+; exist, and we set our local memc flag to 1 since only Archimedes-class systems
+; will ever have a MEMC1, and these can't run RISC OS 3.5.
+;
+; memc1_ptr is the address of our copy of the flag in C-land. Since we're a
+; relocatable module, though, we cannot access this as an absolute address as we
+; normally would! We have to offset it by our relocation address.
+;
+; The symbol _Mod$Reloc$Off contains the offset from the stack limit where we
+; can find our relocation address, so we should be able to do something like:
+;
+;       LDR r14, [sl, #|_Mod$Reloc$Off|]
+;
+; to get our relocation address into R14. Unfortunately objasm doesn't let us
+; use external symbols this way, so we hack around it by doing:
+;
+;       DCD |_Mod$Reloc$Off| + &E51AE000
+;
+; where &E51AE000 is the encoding of "LDR r14, [sl, #0]." The offset value is in
+; the least significant bits of the instruction, so adding the two together gets
+; us what we want. From there we can do something like
+;
+;       LDR r4, memc_ptr
+;       LDRB r3, [r4, r14]
+;
+; to get the value of the memc1 C symbol. Phew.
+
+memc1a_ptr	DCD	memc1a_flag ; relocated address of memc1a_flag C symbol
+
+; copy_io_in - copy data from 16-bit Podule memory
+; R0: Address in Podule memory
+; R1: Buffer to copy into
+; R2: Number of bytes to copy
+copy_io_in      ROUT
+                MOVS    r2,r2                   ; zero byte count?
+                MOVEQS  pc,lr                   ; if so, return.
+                STMFD   sp!, {r4-r11,lr}
+                ANDS    r3,r0,#1                ; is source word aligned?
+                BEQ     aligned
+                LDRB    r4,[r0],#3
+                STRB    r4,[r1],#1
+                SUBS    r2,r2,#1
+                BNE     aligned                 ; was this the only byte?
+                LDMFD   sp!, {r4-r11,pc}^       ; if so return
+
+aligned         ; check for original MEMC1 and always take the slow path
+                LDR     r4,memc1a_ptr           ; relocation magic (see above)
+                DCD     |_Mod$Reloc$Off| + &E51AE000 ; ldr r14, [sl, #|_Mod$Reloc$Off|]
+                LDRB    r3,[r4,r14]             ; get flag byte
+                ANDS    r3,r3,#&1               ; MEMC 1 ?
+                BEQ     scopy_io_in             ; MEMC 1, do slow copy.
+
+                ; we have MEMC1a or better, see if we can do a fast copy
+                ANDS    R3,R1,#3                ; is dst word aligned?
+                BNE     scopy_io_in             ; no, so slow copy.
+                ANDS    R3,R0,#3                ; is src word aligned?
+                BNE     scopy_io_in             ; no, so slow copy.
+                MOVS    r3,r2, LSR #4           ; # of 16 byte blocks
+                SUB     r2,r2,r3, LSL #4        ; reminder to r2.
+                BEQ     noblocks                ; no blocks to copy.
+blockloop       LDMIA   r0!,{r4-r10,r12}        ; get 8 words
+                JoinHWords r4,r4,r5
+                JoinHWords r6,r6,r7
+                JoinHWords r8,r8,r9
+                JoinHWords r10,r10,r12          ; Join half words to words
+                STMIA   r1!,{r4,r6,r8,r10}      ; Write words out.
+                SUBS    r3,r3,#1                ; Any more blocks?
+                BNE     blockloop               ; If so, loop.
+noblocks        MOVS    r3,r2,LSR #2            ; Any full words?
+                SUB     r2,r2,r3,LSL #2         ; reminder to r2
+                BEQ     nowords                 ; if not, skip.
+wordloop        LDMIA   r0!,{r4-r5}             ; load two words.
+                JoinHWords r4,r4,r5             ; Join them.
+                STR     r4,[r1],#4              ; store result.
+                SUBS    r3,r3,#1                ; decrement word count
+                BNE     wordloop                ; loop
+nowords         CMP     r2,#2                   ; any half words?
+                LDRGE   r4,[r0],#4              ; get a word.
+                STRGEB  r4,[r1],#1              ; store first byte
+                MOVGE   r4,r4, LSR #8
+                STRGEB  r4,[r1],#1              ; and second byte.
+                SUBGE   r2,r2,#2                ; decrement count.
+                MOVS    r2,r2
+                LDRNE   r4,[r0],#4              ; Get that last word
+                STRNEB  r4,[r1],#1              ; store it.
+                LDMFD   sp!, {r4-r11,pc}^       ; Return.
+scopy_io_in     LDR     r4,[r0],#4              ; get one word.
+                STRB    r4,[r1],#1              ; store it.
+                MOV     r4,r4,LSR #8
+                STRB    r4,[r1],#1              ; store second half.
+                SUB     r2,r2,#2                ; decrement count
+                CMP     r2,#2
+                BGE     scopy_io_in             ; if not done, loop.
+                CMP     r2,#1
+                LDREQB  r4,[r0],#1              ; get the last byte.
+                STREQB  r4,[r1],#1
+                LDMFD   sp!, {r4-r11,pc}^       ; Return.
+
+; copy_io_out - copy data to 16-bit Podule memory
+; R0: Buffer to copy out of
+; R1: Start address in Podule memory
+; R2: Number of bytes to copy
+copy_io_out     ROUT
+                MOVS    r2,r2                   ; zero byte count?
+                MOVEQ   r0,r1
+                MOVEQS  pc,lr                   ; if so, return.
+                STMFD   sp!, {r4-r11,lr}
+                ANDS    r3,r1,#1                ; is dst word aligned?
+                BEQ     aligned_out
+                SUB     r1,r1,#1
+                LDR     r4,[r1]
+                AND     r4,r4,#&FF
+                LDRB    r5,[r0],#1
+                ORR     r4,r4,r5,LSL #8
+                MOV     r4,r4,LSL #16
+                STR     r4,[r1],#4
+                SUBS    r2,r2,#1
+                BNE     aligned_out             ; was this the only byte?
+                MOV     r0,r1
+                LDMFD   sp!, {r4-r11,pc}^       ; if so return
+
+aligned_out     ; check for original MEMC1 and always take the slow path
+                LDR     r4,memc1a_ptr
+                DCD     |_Mod$Reloc$Off| + &E51AE000 ; ldr r14, [sl, #|_Mod$Reloc$Off|]
+                LDRB    r3,[r4,r14]             ; get flag byte
+                ANDS    r3,r3,#1                ; MEMC 1 ?
+                BEQ     scopy_io_out            ; MEMC 1, do slow copy.
+
+                ; we have MEMC1a or better, see if we can do a fast copy
+                ANDS    R3,R1,#3                ; is dst word aligned?
+                BNE     scopy_io_out            ; no, so slow copy.
+                ANDS    R3,R0,#3                ; is src word aligned?
+                BNE     scopy_io_out            ; no, so slow copy.
+                MOVS    r3,r2, LSR #4           ; # of 16 byte blocks
+                SUB     r2,r2,r3, LSL #4        ; reminder to r2.
+                BEQ     noblocks_out            ; no blocks to copy.
+blockloop_out   LDMIA   r0!,{r5,r7,r9,r12}      ; get 4 words
+                SplitWord r4,r5
+                SplitWord r6,r7
+                SplitWord r8,r9
+                SplitWord r10,r12               ; split to half words
+                STMIA   r1!,{r4-r10,r12}        ; Write words out.
+                SUBS    r3,r3,#1                ; Any more blocks?
+                BNE     blockloop_out           ; If so, loop.
+noblocks_out    MOVS    r3,r2,LSR #2            ; Any full words?
+                SUB     r2,r2,r3,LSL #2         ; reminder to r2
+                BEQ     nowords_out             ; if not, skip.
+wordloop_out    LDR     r5,[r0],#4              ; load a word.
+                SplitWord r4,r5                 ; Split it up.
+                STMIA   r1!,{r4,r5}             ; store result.
+                SUBS    r3,r3,#1                ; decrement word count
+                BNE     wordloop_out            ; loop
+nowords_out     CMP     r2,#2                   ; any half words?
+                LDRGE   r4,[r0],#2              ; get a word.
+                MOVGE   r4,r4,LSL #16           ; shift two bytes.
+                STRGE   r4,[r1],#4              ; store it.
+                SUBGE   r2,r2,#2                ; decrement count.
+                MOVS    r2,r2
+                LDRNEB  r4,[r0],#1              ; Get that last byte.
+                MOVNE   r4,r4,LSL #16           ; shift into place.
+                STRNE   r4,[r1],#1              ; store it.
+                MOV     r0,r1
+                LDMFD   sp!, {r4-r11,pc}^       ; Return.
+scopy_io_out    LDRB    r4,[r0],#1              ; get one byte.
+                MOV     r4,r4,LSL #16
+                BIC     r4,r4,#&FF000000
+                LDRB    r5,[r0],#1              ; and another
+                ORR     r4,r4,r5,LSL #24        ; join them.
+                STR     r4,[r1],#4              ; store it.
+                SUB     r2,r2,#2                ; decrement count
+                CMP     r2,#2
+                BGE     scopy_io_out            ; if not done, loop.
+                CMP     r2,#1
+                LDREQB  r4,[r0],#1              ; get the last byte.
+                MOVEQ   r4,r4,LSL #16           ; shift into place.
+                STREQ   r4,[r1],#1
+                MOV     r0,r1
+                LDMFD   sp!, {r4-r11,pc}^       ; Return.
+
+                END

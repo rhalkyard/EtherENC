@@ -1,0 +1,456 @@
+/*
+Register definitions for Microchip ENC624J600 Ethernet controller
+
+Copyright (C) 2023-2024 Richard Halkyard
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+#ifndef enc_regs_h
+#define enc_regs_h
+
+/*
+ENC624J600 registers are all 16 bits wide, but podule addresses are on 32 bit
+boundaries, with bits 0 and 1 of the address not present on the podule bus.
+
+When addressing a 16 bit card, each 32 bit word maps to one halfword register.
+This lets us use the register numbers defined in the ENC624J600 datasheet as
+indices into an array of unsigned ints representing each register.
+
+For 8 bit cards, each 32 bit word maps onto one byte-wide half of a register.
+This is a bit messier - accessing a whole register has to be broken into two
+word accesses, but it can be managed similarly.
+
+Note that when writing to a podule (or other I/O bus address), data must be put
+on the high halfword of the bus. Acorn's docs say that 'to maintain upwards
+compatibility with future machines' the same data should be put on both
+halfwords, but it's not clear if any extant hardware actually requires this.
+*/
+
+#define BIT(n) (1 << (n))
+#define BITS(n) (BIT((n) + 1) - 1)
+
+/*
+Accessor macros for ENC624J600 registers:
+
+  base: the base address of the ENC624J600
+  reg: the address of the register in the ENC624J600's memory map
+  value: a 16-bit value to write to the register
+*/
+
+#ifdef ENC_8_BIT
+#define ENC_WRITE_REG(base, reg, val)                                      \
+	do {                                                               \
+		base[2 * (reg)] = (((val) & 0xff) << 16) | ((val) & 0xff); \
+		base[2 * (reg) + 1] = (((val) & 0xff00) << 8) |            \
+				      (((val) & 0xff00) >> 8);             \
+	} while (0);
+
+#define ENC_READ_REG(base, reg) \
+	((base[2 * (reg)] & 0xff) | ((base[2 * (reg) + 1] & 0xff) << 8))
+#else
+/* Write a 16-bit value to a register */
+#define ENC_WRITE_REG(base, reg, val) \
+	(base[reg] = ((val) << 16) | ((val) & 0xffff))
+
+/* Read a 16-bit value from a register */
+#define ENC_READ_REG(base, reg) (base[reg] & 0xffff)
+#endif
+
+/*
+The ENC624J600 has special registers that allow individual bits of certain
+registers to be set or cleared, saving us a read-modify-write cycle. Note that
+while the bit-set and -clear registers are at a fixed offset from the main
+registers, not all registers can be manipulated in this way!
+*/
+
+#define ENC_SET_BIT_OFFSET 0x80
+#define ENC_CLEAR_BIT_OFFSET 0xc0
+
+#define SET_REG(reg) ((reg) + ENC_SET_BIT_OFFSET)
+#define CLEAR_REG(reg) ((reg) + ENC_CLEAR_BIT_OFFSET)
+
+/*
+Set bits in a register using the set-bit register at reg + 0x100
+
+Equivalent to (but faster than):
+  unsignd short tmp = ENC_READ_REG(base, reg);
+  tmp |= bitfield
+  ENC_WRITE_REG(base, reg, tmp);
+*/
+#define ENC_SET_BITS(base, reg, bitfield) \
+	ENC_WRITE_REG((base), SET_REG(reg), (bitfield))
+
+/*
+Clear bits in a register using the clear-bit register at reg + 0x180
+
+Equivalent to (but faster than):
+  unsigned short tmp = ENC_READ_REG(base, reg);
+  tmp &= ~bitfield
+  ENC_WRITE_REG(base, reg, tmp);
+*/
+#define ENC_CLEAR_BITS(base, reg, bitfield) \
+	ENC_WRITE_REG((base), CLEAR_REG(reg), (bitfield))
+
+/* Register definitions start here */
+#define ETXST 0x00
+#define ETXLEN 0x01
+#define ERXST 0x02
+#define ERXTAIL 0x03
+#define ERXHEAD 0x04
+#define EDMAST 0x05
+#define EDMALEN 0x06
+#define EDMADST 0x07
+#define EDMACS 0x08
+#define ETXSTAT 0x09
+#define ETXWIRE 0x0a
+
+/* these registers are mirrored at offsets b..f in each bank of 16 registers. */
+#define EUDAST 0x0b
+#define EUDAND 0x0c
+#define ESTAT 0x0d
+#define EIR 0x0e
+#define ECON1 0x0f
+
+#define EHT1 0x10
+#define EHT2 0x11
+#define EHT3 0x12
+#define EHT4 0x13
+#define EPMM1 0x14
+#define EPMM2 0x15
+#define EPMM3 0x16
+#define EPMM4 0x17
+#define EPMCS 0x18
+#define EPMOL 0x19
+#define ERXFCON 0x1a
+/* registers 1b..1f are mirrors of 0b..0f */
+
+#define MACON1 0x20
+#define MACON2 0x21
+#define MABBIPG 0x22
+#define MAIPG 0x23
+#define MACLCON 0x24
+#define MAMXFLL 0x25
+/* registers 26..28 are reserved */
+#define MICMD 0x29
+#define MIREGADR 0x2a
+/* registers 2b..2f are mirrors of 0b..0f */
+
+#define MAADR3 0x30
+#define MAADR2 0x31
+#define MAADR1 0x32
+#define MIWR 0x33
+#define MIRD 0x34
+#define MISTAT 0x35
+#define EPAUS 0x36
+#define ECON2 0x37
+#define ERXWM 0x38
+#define EIE 0x39
+#define EIDLED 0x3a
+/* registers 3b..3f are mirrors of 0b..0f */
+
+#define EGPDATA 0x40
+#define ERXDATA 0x41
+#define EUDADATA 0x42
+#define EGPRDPT 0x43
+#define EGPWRPT 0x44
+#define ERXRDPT 0x45
+#define ERXWRPT 0x46
+#define EUDARDPT 0x47
+#define EUDAWRPT 0x48
+/* registers 49..4f are reserved */
+
+/* PHY registers */
+#define PHCON1 0x00
+#define PHSTAT1 0x01
+#define PHANA 0x04
+#define PHANLPA 0x05
+#define PHANE 0x06
+#define PHCON2 0x11
+#define PHSTAT2 0x1b
+#define PHSTAT3 0x1f
+
+/* Register bit and field definitions. */
+/* ESTAT */
+#define ESTAT_INT BIT(15)
+#define ESTAT_FCIDLE BIT(14)
+#define ESTAT_RXBUSY BIT(13)
+#define ESTAT_CLKRDY BIT(12)
+#define ESTAT_PHYDPX BIT(10)
+#define ESTAT_PHYLNK BIT(8)
+#define ESTAT_PKTCNT_SHIFT 0
+#define ESTAT_PKTCNT_MASK 0x00ff
+
+/* EIR */
+#define EIR_CRYPTEN BIT(15)
+#define EIR_MODEXIF BIT(14)
+#define EIR_HASHIF BIT(13)
+#define EIR_AESIF BIT(12)
+#define EIR_LINKIF BIT(11)
+#define EIR_PKTIF BIT(6)
+#define EIR_DMAIF BIT(5)
+#define EIR_TXIF BIT(3)
+#define EIR_TXABTIF BIT(2)
+#define EIR_RXABTIF BIT(1)
+#define EIR_PCFULIF BIT(0)
+
+/* ECON1 */
+#define ECON1_MODEXST BIT(15)
+#define ECON1_HASHEN BIT(14)
+#define ECON1_HASHOP BIT(13)
+#define ECON1_HASHLST BIT(12)
+#define ECON1_AESST BIT(11)
+#define ECON1_AESOP1 BIT(10)
+#define ECON1_AESOP0 BIT(9)
+#define ECON1_PKTDEC BIT(8)
+#define ECON1_FCOP1 BIT(7)
+#define ECON1_FCOP0 BIT(6)
+#define ECON1_DMAST BIT(5)
+#define ECON1_DMACPY BIT(4)
+#define ECON1_DMACSSD BIT(3)
+#define ECON1_DMANOCS BIT(2)
+#define ECON1_TXRTS BIT(1)
+#define ECON1_RXEN BIT(0)
+
+/* ETXSTAT */
+#define ETXSTAT_LATECOL BIT(10)
+#define ETXSTAT_MAXCOL BIT(9)
+#define ETXSTAT_EXDEFER BIT(8)
+#define ETXSTAT_DEFER BIT(7)
+#define ETXSTAT_CRCBAD BIT(4)
+#define ETXSTAT_COLCNT_SHIFT 0
+#define ETXSTAT_COLCNT_MASK 0x000f
+
+/* ERXFCON */
+#define ERXFCON_HTEN BIT(15)
+#define ERXFCON_MPEN BIT(14)
+#define ERXFCON_NOTPM BIT(12)
+#define ERXFCON_PMEN_SHIFT 8
+#define ERXFCON_PMEN_MASK 0x0f00
+#define ERXFCON_CRCEEN BIT(7)
+#define ERXFCON_CRCEN BIT(6)
+#define ERXFCON_RUNTEEN BIT(5)
+#define ERXFCON_RUNTEN BIT(4)
+#define ERXFCON_UCEN BIT(3)
+#define ERXFCON_NOTMEEN BIT(2)
+#define ERXFCON_MCEN BIT(1)
+#define ERXFCON_BCEN BIT(0)
+
+/* MACON1 */
+#define MACON1_LOOPBK BIT(4)
+#define MACON1_RXPAUS BIT(2)
+#define MACON1_PASSALL BIT(1)
+
+/* MACON2 */
+#define MACON2_DEFER BIT(14)
+#define MACON2_BPEN BIT(13)
+#define MACON2_NOBKOFF BIT(12)
+#define MACON2_ADCFG_SHIFT 5
+#define MACON2_PADCFG_MASK 0x00e0
+#define MACON2_TXCRCEN BIT(4)
+#define MACON2_PHDREN BIT(3)
+#define MACON2_HFRMEN BIT(1)
+#define MACON2_FULDPX BIT(0)
+
+/* MABBIPG */
+#define MABBIPG_BBIPG_SHIFT 0
+#define MABBIPG_BBIPG_MASK 0x007f
+
+/* MAIPG */
+#define MAIPG_IPG_SHIFT 0
+#define MAIPG_IPG_MASK 0x007f
+
+/* MICMD */
+#define MICMD_MIISCAN BIT(1)
+#define MICMD_MIIRD BIT(0)
+
+/* MIREGADR */
+#define MIREGADR_PHREG_SHIFT 0
+#define MIREGADR_PHREG_MASK 0x001f
+
+/* MISTAT */
+#define MISTAT_NVALID BIT(2)
+#define MISTAT_SCAN BIT(1)
+#define MISTAT_BUSY BIT(0)
+
+/* ECON2 */
+#define ECON2_ETHEN BIT(15)
+#define ECON2_STRCH BIT(14)
+#define ECON2_TXMAC BIT(13)
+#define ECON2_SHA1MD5 BIT(12)
+#define ECON2_COCON_SHIFT 8
+#define ECON2_COCON_MASK 0x0f00
+#define ECON2_AUTOFC BIT(7)
+#define ECON2_TXRST BIT(6)
+#define ECON2_RXRST BIT(5)
+#define ECON2_ETHRST BIT(4)
+#define ECON2_MODLEN_SHIFT 2
+#define ECON2_MODLEN_MASK 0x00c0
+#define ECON2_AESLEN_SHIFT 0
+#define ECON2_AESLEN_MASK 0x0003
+
+/* ERXWM */
+#define ERXWM_RXFWM_SHIFT 8
+#define ERXWM_RXFWM_MASK 0xff00
+#define ERXWM_RXEWM_SHIFT 0
+#define ERXWM_RXEWM_MASK 0x00ff
+
+/* EIE */
+#define EIE_INTIE BIT(15)
+#define EIE_MODEXIE BIT(14)
+#define EIE_HASHIE BIT(13)
+#define EIE_AESIE BIT(12)
+#define EIE_LINKIE BIT(11)
+#define EIE_PKTIE BIT(6)
+#define EIE_DMAIE BIT(5)
+#define EIE_TXIE BIT(3)
+#define EIE_TXABTIE BIT(2)
+#define EIE_RXABTIE BIT(1)
+#define EIE_PCFULIE BIT(0)
+
+/* EIDLED */
+#define EIDLED_LACFG_SHIFT 12
+#define EIDLED_LACFG_MASK 0xf000
+#define EIDLED_LBCFG_SHIFT 8
+#define EIDLED_LBCFG_MASK 0x0f00
+#define EIDLED_DEVID_SHIFT 5
+#define EIDLED_DEVID_MASK 0x00e0
+#define EIDLED_REVID_SHIFT 0
+#define EIDLED_REVID_MASK 0x001f
+
+/* PHY register bit definitions */
+/* PHCON1 */
+#define PHCON1_PRST BIT(15)
+#define PHCON1_PLOOPBK BIT(14)
+#define PHCON1_SPD100 BIT(13)
+#define PHCON1_ANEN BIT(12)
+#define PHCON1_PSLEEP BIT(11)
+#define PHCON1_RENEG BIT(9)
+#define PHCON1_PFULDPX BIT(8)
+
+/* PHSTAT1 */
+#define PHSTAT1_FULL100 BIT(14)
+#define PHSTAT1_HALF100 BIT(13)
+#define PHSTAT1_FULL10 BIT(12)
+#define PHSTAT1_HALF10 BIT(11)
+#define PHSTAT1_ANDONE BIT(5)
+#define PHSTAT1_LRFAULT BIT(4)
+#define PHSTAT1_ANABLE BIT(3)
+#define PHSTAT1_LLSTAT BIT(2)
+#define PHSTAT1_EXTREGS BIT(0)
+
+/* PHANA */
+#define PHANA_ADNP BIT(15)
+#define PHANA_ADFAULT BIT(13)
+#define PHANA_ADPAUS1 BIT(11)
+#define PHANA_ADPAUS0 BIT(10)
+#define PHANA_AD100FD BIT(8)
+#define PHANA_AD100 BIT(7)
+#define PHANA_AD10FD BIT(6)
+#define PHANA_AD10 BIT(5)
+#define PHANA_ADIEEE_SHIFT 0
+#define PHANA_ADIEEE_MASK 0x000f
+
+/* PHANLPA */
+#define PHANLPA_LPNP BIT(15)
+#define PHANLPA_LPACK BIT(14)
+#define PHANLPA_LPFAULT BIT(13)
+#define PHANLPA_LPPAUS1 BIT(11)
+#define PHANLPA_LPPAUS0 BIT(10)
+#define PHANLPA_LP100T4 BIT(9)
+#define PHANLPA_LP100FD BIT(8)
+#define PHANLPA_LP100 BIT(7)
+#define PHANLPA_LP10FD BIT(6)
+#define PHANLPA_LP10 BIT(5)
+#define PHANLPA_LPIEEE_SHIFT 0
+#define PHANLPA_LPIEEE_MASK 0x00ff
+
+/* PHANE */
+#define PHANE_PDFLT BIT(4)
+#define PHANE_LPARCD BIT(1)
+#define PHANE_LPANABL BIT(0)
+
+/* PHCON2 */
+#define PHCON2_EDPWRDN BIT(13)
+#define PHCON2_EDTHRES BIT(11)
+#define PHCON2_FRCLNK BIT(2)
+#define PHCON2_EDSTAT BIT(1)
+
+/* PHSTAT2 */
+#define PHSTAT2_PLRITY BIT(4)
+
+/* PHSTAT3 */
+#define PHSTAT3_SPDDPX_SHIFT 2
+#define PHSTAT3_SPDDPX_MASK 0x001c
+
+/* 
+Bit flags in the Receive Status Vector
+
+Packets in the ENC624J600's receive buffer have a Receive Status vector header,
+made up like this: 
+
+struct rsv {
+	unsiged short next;
+	unsigned short framelen;
+	unsigned int flags;
+};
+
+Where `next` is the address of the next packet, and `framelen` is the length in
+bytes (including ethernet header and checksum) of the frame following the
+header. `flags` is a bitfield, defined as follows:
+*/
+
+/* Bits 31-23: zero*/
+/* Bits 22-21: reserved */
+/* Destination is unicast to us */
+#define RSV_UNICAST BIT(20)
+/* Current frame met criteria for the Pattern Match Receive filter */
+#define RSV_PATTERNMATCH BIT(19)
+/* Current frame met criteria for the Magic Packet Receive filter */
+#define RSV_MAGICPACKET BIT(18)
+/* Destination matched a hash table entry */
+#define RSV_HASH_MATCH BIT(17)
+/* Current frame met criteria for the Not-Me Receive filter */
+#define RSV_NOTME BIT(16)
+/* Current frame met criteria for the Runt Packet Receive filter */
+#define RSV_RUNT BIT(15)
+/* Current frame was recognized as a VLAN tagged frame */
+#define RSV_VLAN BIT(14)
+/* Current frame was recognized as a control frame with an unknown opcode */
+#define RSV_CONTROL_UNKNOWN BIT(13)
+/* Current frame was recognized as a control frame with a PAUSE opcode */
+#define RSV_CONTROL_PAUSE BIT(12)
+/* Current frame was recognized as a control frame */
+#define RSV_CONTROL BIT(11)
+/* Extra 'dribble' bits were received and discarded after this packet */
+#define RSV_DRIBBLE BIT(10)
+/* Destination is broadcast */
+#define RSV_BROADCAST BIT(9)
+/* Destination is multicast */
+#define RSV_MULTICAST BIT(8)
+/* Packet was received without errors */
+#define RSV_OK BIT(7)
+/* Packet length out of range */
+#define RSV_LENGTH_RANGE_ERR BIT(6)
+/* Packet length check error */
+#define RSV_LENGTH_CHECK_ERR BIT(5)
+/* Packet was received with CRC error */
+#define RSV_CRC_ERR BIT(4)
+/* Bit 3: Reserved */
+/* Carrier event was seen since last packet */
+#define RSV_CARRIER_EVENT BIT(2)
+/* Bit 1: reserved */
+/* Packet was previously ignored */
+#define RSV_PREV_IGNORED BIT(0)
+
+#endif

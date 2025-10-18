@@ -1,0 +1,61 @@
+; Module definition for EtherENC driver for RISC OS
+;
+; Copyright (C) 2025 Richard Halkyard
+;
+; This program is free software: you can redistribute it and/or modify it under
+; the terms of the GNU General Public License as published by the Free Software
+; Foundation, either version 3 of the License, or (at your option) any later
+; version.
+;
+; This program is distributed in the hope that it will be useful, but WITHOUT
+; ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+; FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+; details.
+;
+; You should have received a copy of the GNU General Public License along with
+; this program.  If not, see <https://www.gnu.org/licenses/>.
+
+#include "sys/dcistructs.h"
+#include "sys/mbuf.h"
+#include "debug.h"
+
+#ifdef DEBUG
+#define COMMENT() Debug Build
+#else
+#define COMMENT()
+#endif
+
+help-string:  EtherENC 0.01 COMMENT()
+
+title-string: EtherENC
+
+initialisation-code: module_init
+
+finalisation-code: module_fini
+
+; TODO: use a real SWI base
+swi-chunk-base-number: 0xC0000
+
+swi-handler-code: do_swi
+
+service-call-handler: do_service Service_EnumerateNetworkDrivers Service_DCIProtocolStatus Service_MbufManagerStatus
+
+swi-decoding-table: EtherENC,
+                    DCIVersion, Inquire, GetNetworkMTU, SetNetworkMTU, Transmit, Filter, Stats
+
+command-keyword-table: do_command
+    ENCStats(min-args:0, max-args:1, add-syntax:,
+      help-text: "Print statistics",
+      invalid-syntax: "Syntax: *ENCStats [unit]"),
+    ENCTest(min-args:0, max-args:1, add-syntax:,
+      help-text: "Run self-test",
+      invalid-syntax: "Syntax: *ENCTest [unit]"),
+    ENCFlow(min-args:2, max-args:2, add-syntax:, configure:, status:,
+      help-text: "Flow control",
+      invalid-syntax: "Syntax: *Configure ENCFlow <unit> On|Off"),
+    ENCLink(min-args:2, max-args:3, add-syntax:, configure:, status:,
+      help-text: "Link mode",
+      invalid-syntax: "Syntax: *Configure ENCLink <unit> Auto | 10 Half|Full | 100 Half|Full")
+
+generic-veneers: startup_veneer/startup_handler,
+                 enc_isr_veneer1/enc_isr

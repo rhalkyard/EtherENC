@@ -1,0 +1,83 @@
+/* Packet-filtering logic for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#ifndef _filter_h
+#define _filter_h
+
+#include "kernel.h"
+
+#include "if_enc.h"
+
+/* Filter macros borrowed from EtherY */
+/* Devious address level evaluation. Incoming packets are in one of
+ * 4 classes, and protocol modules set one of 4 address levels, so
+ * there's a matrix of 16 filtering outcomes
+ *
+ *                       SPECIFIC  BROADCAST MULTICAST SPECIFIC
+ *                       AND MINE                      BUT NOT MINE
+ * ADDRLVL_SPECIFIC      keep      drop      drop      drop
+ * ADDRLVL_NORMAL        keep      keep      drop      drop
+ * ADDRLVL_MULTICAST     keep      keep      keep      drop
+ * ADDRLVL_PROMISCUOUS   keep      keep      keep      keep
+ *
+ * which can be encoded as a mask and indexed using a 4 bit shift
+ */
+#define IS_MINE 3
+#define IS_BROADCAST 2
+#define IS_MULTICAST 1
+#define IS_SPECIFIC 0
+#define IS_A_KEEPER(lvl, cls) ((0xFEC8 & (1 << ((cls) | ((lvl) << 2)))) != 0)
+#define IS_GOOD_ENOUGH(lvl, err) (((lvl) == ERRLVL_ERRORS) || (!err))
+
+#define CONFIG_LINKMASK 0x7
+#define CONFIG_LINK_MANUAL 0x1
+#define CONFIG_LINK_FULL 0x2
+#define CONFIG_LINK_100 0x4
+#define CONFIG_FLOWMASK 0x8
+#define CONFIG_FLOW_ON 0x8
+#define CONFIG_MASK (CONFIG_LINKMASK | CONFIG_FLOWMASK)
+
+struct enc_context;
+struct enc_pkthdr;
+
+typedef void (*filter_handler_t)(struct dib *, struct mbuf *);
+
+struct filter {
+	unsigned int type;
+	unsigned char errorlevel;
+	unsigned char addresslevel;
+	void *pw;
+	filter_handler_t handler;
+	struct filter *next;
+};
+
+_kernel_oserror *filter_add(struct enc_context *ctx, unsigned int type,
+			    unsigned int addrlevel, unsigned int errorlevel,
+			    filter_handler_t handler, void *pw);
+
+_kernel_oserror *filter_remove(struct enc_context *ctx, unsigned int type,
+			       unsigned int addrlevel, unsigned int errorlevel,
+			       filter_handler_t handler, void *pw);
+
+void filter_removemodule(struct enc_context *ctx, void *pw);
+
+void filter_removeall(struct enc_context *ctx);
+
+struct filter *filter_lookup(struct enc_context *ctx, struct enc_pkthdr *hdr);
+
+#endif

@@ -1,0 +1,68 @@
+/* I/O definitions for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#ifndef _enc_io_h
+#define _enc_io_h
+
+#define ENC_PAGE_LEN 0x2000
+#define ENC_MEM_LEN 0x6000
+
+#define TXBUF_BASE 0
+#define TXBUF_LEN 0x600
+#define TXBUF_END TXBUF_BASE + TXBUF_LEN
+#define RXBUF_BASE TXBUF_END
+#define RXBUF_LEN ENC_MEM_LEN - TXBUF_LEN
+#define RXBUF_END RXBUF_BASE + RXBUF_LEN
+
+#define IRQ_REG 0x2000
+#define IRQ_BIT_ETH 1 << 0
+
+/* Base address of the ENC624J600's registers in IOC space. */
+#define ENC_REGBASE 0x3800
+
+/* Reason codes for our Podule_CallLoader SWI */
+#define ENC_LDR_SETPAGE 0
+#define ENC_LDR_POWERON 1
+#define ENC_LDR_IRQON 2
+
+#define htons(val) (((val & 0xff00) >> 8) | ((val & 0x00ff) << 8))
+#define ntohs(val) htons(val)
+
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+
+/*
+Bits 19-21 of the Podule address select the access mode
+
+Bit 21  20  19  Mode
+    0   0   0   MEMC
+    1   0   0   Slow
+    1   0   1   Medium
+    1   1   0   Fast
+    1   1   1   2MHz Synchronous
+
+Addresses returned from SWIs are synchronous (i.e. bits 19-21 all set) so we can
+select a faster access mode by masking bits off.
+*/
+#define SLOT_MASK_CMOS 0x0000FFF
+#define SLOT_MASK_MEMC 0x3C7C000
+#define SLOT_MASK_SLOW 0x3E7C000
+#define SLOT_MASK_MEDIUM 0x3EFC000
+#define SLOT_MASK_FAST 0x3F7C000
+#define SLOT_MASK_SYNC 0x3FFC000
+
+#endif

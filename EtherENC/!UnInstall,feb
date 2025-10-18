@@ -1,0 +1,4 @@
+If "<InetSetup$Dir>" = "" Then Error "InetSetup$Dir not set"
+Remove <InetSetup$Dir>.AutoSense.EtherENC
+Remove <System$Dir>.Modules.Network.EtherENC
+Echo EtherENC driver uninstalled

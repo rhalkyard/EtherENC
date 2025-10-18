@@ -1,0 +1,11 @@
+*.doc
+*.fit
+*.io
+*.jed
+*.lst
+*.pin
+*.pla
+*.svf
+*.tt2
+*.tt3
+prjbureau/

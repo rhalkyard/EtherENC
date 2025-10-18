@@ -1,0 +1,53 @@
+/* Error helper code for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "errors.h"
+
+#include "kernel.h"
+#include "sys/dcistructs.h"
+
+static _kernel_oserror errblk;
+
+static char *errtxt[] = { "No podule slots on this system",
+			  "No EtherENC devices found",
+			  "Only a single instance of this module may be loaded",
+			  "Device failed self-test" };
+
+/* Take either a unix errno or a RISC OS error number from our allocation, and
+ * produce a RISC OS error block with a hopefully-meanginful message
+ */
+_kernel_oserror *enc_error(enum enc_err error)
+{
+	if (error) {
+		if (error >= 0x80) {
+			if (error >= ENC_ERRBASE && error < ENC_ERR_MAX)
+				strcpy(errblk.errmess,
+				       errtxt[error - ENC_ERRBASE]);
+			else
+				sprintf(errblk.errmess, "ENC module error %x",
+					error);
+			errblk.errnum = error;
+		} else {
+			sprintf(errblk.errmess, "ENC module errno %x", error);
+			REALLYSETDCI4ERRNO(errblk.errnum, error);
+		}
+
+		return &errblk;
+	} else
+		return ((_kernel_oserror *)0);
+}

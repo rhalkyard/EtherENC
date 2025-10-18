@@ -1,0 +1,337 @@
+/* Packet-filtering logic for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "debug.h"
+#include "enc_regs.h"
+#include "errors.h"
+#include "filter.h"
+#include "glue.h"
+#include "if_enc.h"
+
+#include "kernel.h"
+#include "stdlib.h"
+#include "swis.h"
+#include "sys/dcistructs.h"
+#include "sys/errno.h"
+
+/* Evaluate the current filter chain, configuring the NIC's receive filters to
+ * catch the packets we are interested in.
+ */
+static void filter_eval(struct enc_context *ctx)
+{
+	struct filter *f;
+	int addresslevel = ADDRLVL_SPECIFIC;
+	int errorlevel = ERRLVL_NO_ERRORS;
+	unsigned int erxfcon, st_rxstatus;
+
+	f = ctx->filters;
+
+	while (f != NULL) {
+		if (f->addresslevel > addresslevel)
+			addresslevel = f->addresslevel;
+		if (f->errorlevel > errorlevel)
+			errorlevel = f->errorlevel;
+		f = f->next;
+	}
+
+	st_rxstatus = ST_STATUS_DIRECT;
+
+	erxfcon = ERXFCON_CRCEN | ERXFCON_RUNTEN;
+	switch (addresslevel) {
+	case ADDRLVL_PROMISCUOUS:
+		erxfcon |= ERXFCON_NOTMEEN;
+		st_rxstatus |= ST_STATUS_PROMISCUOUS;
+		/* Fall through */
+	case ADDRLVL_MULTICAST:
+		erxfcon |= ERXFCON_MCEN;
+		st_rxstatus |= ST_STATUS_MULTICAST;
+		/* Fall through */
+	case ADDRLVL_NORMAL:
+		erxfcon |= ERXFCON_BCEN;
+		st_rxstatus |= ST_STATUS_BROADCAST;
+		/* Fall through */
+	case ADDRLVL_SPECIFIC:
+		erxfcon |= ERXFCON_UCEN;
+		st_rxstatus |= ST_STATUS_DIRECT;
+		/* Fall through */
+	}
+
+	ctx->addresslevel = addresslevel;
+	ctx->stats.base.st_link_status &= ~ST_STATUS_RXMASK;
+	ctx->stats.base.st_link_status |= st_rxstatus;
+
+	ENC_WRITE_REG(ctx->regs, ERXFCON, erxfcon);
+
+	/* Turn off reception if we don't have any filters to consume packets */
+	if (ctx->filters)
+		ENC_SET_BITS(ctx->regs, ECON1, ECON1_RXEN);
+	else
+		ENC_CLEAR_BITS(ctx->regs, ECON1, ECON1_RXEN);
+}
+
+/* Add a filter to the chain. */
+_kernel_oserror *filter_add(struct enc_context *ctx, unsigned int type,
+			    unsigned int addrlevel, unsigned int errorlevel,
+			    filter_handler_t handler, void *pw)
+{
+	_kernel_oserror *err = NULL;
+	struct filter *f;
+	unsigned int framelevel, frametype;
+	int s;
+	DBGLOG(("EtherENC", 1,
+		"add filter type=%x addrlevel=%d errorlevel=%d pw=%x", type,
+		addrlevel, errorlevel, pw));
+
+	/* Validate arguments are within range */
+	switch (GET_FRAMELEVEL(type)) {
+	case FRMLVL_E2SINK:
+	case FRMLVL_E2MONITOR:
+	case FRMLVL_IEEE:
+		if (GET_FRAMETYPE(type) != 0) {
+			err = enc_error(EINVAL);
+			goto done;
+		}
+		break;
+	case FRMLVL_E2SPECIFIC:
+		break;
+	default:
+		err = enc_error(EINVAL);
+		goto done;
+	}
+
+	switch (addrlevel) {
+	case ADDRLVL_SPECIFIC:
+	case ADDRLVL_NORMAL:
+	case ADDRLVL_MULTICAST:
+	case ADDRLVL_PROMISCUOUS:
+		break;
+	default:
+		err = enc_error(EINVAL);
+		goto done;
+	}
+
+	switch (errorlevel) {
+	case ERRLVL_NO_ERRORS:
+	case ERRLVL_ERRORS:
+		break;
+	default:
+		err = enc_error(EINVAL);
+		goto done;
+	}
+
+	/* Validate that new filter can coexist with existing filters */
+	f = ctx->filters;
+	while (f) {
+		switch (GET_FRAMELEVEL(f->type)) {
+		case FRMLVL_E2SPECIFIC:
+			if (f->type == type ||
+			    GET_FRAMELEVEL(type) == FRMLVL_E2MONITOR) {
+				err = enc_error(INETERR_FILTERGONE);
+				goto done;
+			}
+			break;
+		case FRMLVL_E2SINK:
+			if ((GET_FRAMELEVEL(type) == FRMLVL_E2SINK) ||
+			    (GET_FRAMELEVEL(type) == FRMLVL_E2MONITOR)) {
+				err = enc_error(INETERR_FILTERGONE);
+				goto done;
+			}
+			break;
+		case FRMLVL_E2MONITOR:
+			if (GET_FRAMELEVEL(type) != FRMLVL_IEEE) {
+				err = enc_error(INETERR_FILTERGONE);
+				goto done;
+			}
+			break;
+		case FRMLVL_IEEE:
+			if (GET_FRAMELEVEL(type) == FRMLVL_IEEE) {
+				err = enc_error(INETERR_FILTERGONE);
+				goto done;
+			}
+			break;
+		}
+		f = f->next;
+	}
+
+	f = malloc(sizeof(struct filter));
+	if (!f) {
+		err = enc_error(ENOMEM);
+		goto done;
+	}
+
+	f->type = type;
+	f->errorlevel = errorlevel;
+	f->addresslevel = addrlevel;
+	f->handler = handler;
+	f->pw = pw;
+
+	f->next = ctx->filters;
+	ctx->filters = f;
+
+	filter_eval(ctx);
+
+	DBGLOG(("EtherENC", 1, "Filter added OK"));
+done:
+	irq_restore(s);
+	return NULL;
+}
+
+/* Remove a filter from the chain. */
+_kernel_oserror *filter_remove(struct enc_context *ctx, unsigned int type,
+			       unsigned int addrlevel, unsigned int errorlevel,
+			       filter_handler_t handler, void *pw)
+{
+	_kernel_oserror *err = NULL;
+	struct filter *f, *prev;
+	int removed = 0;
+	int s;
+
+	DBGLOG(("EtherENC", 1, "remove filter pw=%x", pw));
+
+	prev = NULL;
+	s = irqs_off();
+	f = ctx->filters;
+	while (f) {
+		if (f->type == type && f->addresslevel == addrlevel &&
+		    f->errorlevel == errorlevel) {
+			if (f->handler != handler || f->pw != pw) {
+				err = enc_error(EPERM);
+				goto done;
+			}
+			if (prev == NULL)
+				ctx->filters = f->next;
+			else
+				prev->next = f->next;
+			removed = 1;
+			break;
+		}
+		prev = f;
+		f = f->next;
+	}
+done:
+	irq_restore(s);
+
+	if (removed) {
+		_swix(OS_ServiceCall, _INR(0, 4), &ctx->dib,
+		      Service_DCIFrameTypeFree, f->type, f->addresslevel,
+		      f->errorlevel);
+		free(f);
+		s = irqs_off();
+		filter_eval(ctx);
+		irq_restore(s);
+		return NULL;
+	} else if (!err) {
+		err = enc_error(EINVAL);
+	}
+	return err;
+}
+
+/* Remove all filters from the chain belonging to a particular module
+ * (identified by module private word)
+ */
+void filter_removemodule(struct enc_context *ctx, void *pw)
+{
+	struct filter *f, *tmp;
+
+	f = ctx->filters;
+	while (f) {
+		tmp = f;
+		f = f->next;
+		if (tmp->pw == pw)
+			filter_remove(ctx, tmp->type, tmp->addresslevel,
+				      tmp->errorlevel, tmp->handler, tmp->pw);
+	}
+}
+
+/* Remove all filters from the chain */
+void filter_removeall(struct enc_context *ctx)
+{
+	struct filter *f, *tmp;
+
+	f = ctx->filters;
+	while (f) {
+		tmp = f;
+		f = f->next;
+		filter_remove(ctx, tmp->type, tmp->addresslevel,
+			      tmp->errorlevel, tmp->handler, tmp->pw);
+	}
+}
+
+/* Given a packet header, return the filter that matches it, or NULL if no match
+ * found.
+ */
+struct filter *filter_lookup(struct enc_context *ctx, struct enc_pkthdr *hdr)
+{
+	struct filter *f, *result, *sink;
+	unsigned char class, defects;
+	int s;
+
+	if (hdr->flags & RSV_MULTICAST) {
+		class = IS_MULTICAST;
+	} else if (hdr->flags & RSV_BROADCAST) {
+		class = IS_BROADCAST;
+	} else if (hdr->flags & RSV_UNICAST) {
+		class = IS_MINE;
+	} else {
+		class = IS_SPECIFIC;
+	}
+
+	defects = (hdr->flags & RSV_OK) ? 0 : 1;
+
+	sink = NULL;
+	result = NULL;
+
+	s = irqs_off();
+	f = ctx->filters;
+	while (f) {
+		switch (GET_FRAMELEVEL(f->type)) {
+		case FRMLVL_E2SINK:
+			sink = f;
+			break;
+		case FRMLVL_E2MONITOR:
+			if (hdr->ether_header.ether_type > ETHERMTU &&
+			    IS_A_KEEPER(f->addresslevel, class) &&
+			    IS_GOOD_ENOUGH(f->errorlevel, defects))
+				result = f;
+			break;
+		case FRMLVL_IEEE:
+			if (hdr->ether_header.ether_type <= ETHERMTU &&
+			    IS_A_KEEPER(f->addresslevel, class) &&
+			    IS_GOOD_ENOUGH(f->errorlevel, defects))
+				result = f;
+			break;
+		case FRMLVL_E2SPECIFIC:
+			if (IS_A_KEEPER(f->addresslevel, class) &&
+			    IS_GOOD_ENOUGH(f->errorlevel, defects) &&
+			    GET_FRAMETYPE(f->type) ==
+				    hdr->ether_header.ether_type)
+				result = f;
+			break;
+		}
+		if (result)
+			break;
+		f = f->next;
+	}
+
+	if (!result && sink && IS_A_KEEPER(sink->addresslevel, class) &&
+	    IS_GOOD_ENOUGH(sink->errorlevel, defects))
+		result = sink;
+
+	irq_restore(s);
+	return result;
+}

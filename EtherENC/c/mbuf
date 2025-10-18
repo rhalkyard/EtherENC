@@ -1,0 +1,60 @@
+/* Mbuf helper code for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "mbuf.h"
+#include "netinet/if_ether.h"
+#include "syslog.h"
+
+#include "kernel.h"
+#include "swis.h"
+
+struct mbctl MBCTL;
+int mbufsession = 0;
+
+void enc_stop_mbuf_session(void)
+{
+	_swix(Mbuf_CloseSession, _IN(0), &MBCTL);
+	mbufsession = 0;
+}
+
+_kernel_oserror *enc_start_mbuf_session(void)
+{
+	_kernel_oserror *error = NULL;
+
+	/* Read the MbufManager version number to deduce its presence, and
+	 * try to open a session if not got a session already.
+	 */
+	if ((_swix(Mbuf_Control, _IN(0), 0) == NULL) && !mbufsession) {
+		/* Client initialisers */
+		MBCTL.mbcsize = sizeof(MBCTL);
+		MBCTL.mbcvers = MBUF_MANAGER_VERSION;
+		MBCTL.flags = 0;
+		MBCTL.advminubs = MINCONTIG;
+		MBCTL.advmaxubs = ETHERMTU;
+		MBCTL.mincontig = MINCONTIG;
+		MBCTL.spare1 = 0;
+
+		/* Try to get a session */
+		error = (_kernel_oserror *)_swix(Mbuf_OpenSession, _IN(0),
+						 &MBCTL);
+		if (error == NULL)
+			mbufsession = 1;
+	}
+
+	return error;
+}

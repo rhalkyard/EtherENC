@@ -1,0 +1,228 @@
+Name     EtherPodule ;
+PartNo   00 ;
+Date     6/18/2024 ;
+Revision 01 ;
+Designer Richard Halkyard ;
+Company  - ;
+Assembly None ;
+Location  ;
+Device   f1502isptqfp44 ;
+
+/* Enable JTAG interface with internal 10K pullups on TDI and TMS */
+PROPERTY ATMEL { JTAG = ON } ;
+PROPERTY ATMEL { TDI_PULLUP = ON } ;
+PROPERTY ATMEL { TMS_PULLUP = ON } ;
+
+/* Consider pin assignments to be immutable; don't try to rearrange the design
+if it does not fit with the given pin assignments */
+PROPERTY ATMEL { PREASSIGN = KEEP } ;
+
+/* Declare control-line outputs as open-collector so we don't have to mess
+around with .OE */
+PROPERTY ATMEL { OPEN_COLLECTOR = PIRQ, BL, IOGT } ;
+
+/*
+OVERVIEW
+
+This CPLD provides basic control logic for IOC and MEMC podule accesses
+
+Signals in ALL CAPS are external I/Os, signals in lowercase are internal nodes.
+
+IOC-space memory map is as follows:
+
+    0000-1FFF   ROM
+    2000-23FF   Write: paging latch
+                Read: interrupt status
+    2400-37FF   Reserved for IDE hardware
+    3800-3FFF   ENC624J600 registers
+
+MEMC space provides paged access to the ENC624J600's full address space.
+*/
+
+/* INPUT PINS */
+PIN 3   = !IORQ ;       /* Handshake request for MEMC accesses */
+PIN 6   = !PS ;         /* Podule select for IOC accesses */
+PIN 10  = !IORD ;       /* Read strobe (IOC accesses only) */
+PIN 11  = !IOWR ;       /* Write strobe (IOC accesses only) */
+PIN 12  = RW ;          /* Read/Write */
+PIN 13  = !MS ;         /* Podule select for MEMC accesses */
+PIN 23  = !ETH_INT ;    /* Interrupt input from ENC624J600 */
+
+PIN [19,18,15,14] = [LA13..10] ;    /* Address lines */
+
+/* SPECIAL INPUTS */
+PIN 37  = REF8M ;       /* GCLK1 = 8MHz system reference clock */
+PIN 39  = !RST ;        /* GCLR = System reset */
+
+/* OUTPUT PINS */
+PIN 2   = !BL ;         /* Buffer latch control for MEMC accesses */
+PIN 5   = !IOGT ;       /* Handshake grant for MEMC accesses */
+PIN 8   = !PIRQ ;       /* Open-collector IRQ output */
+PIN 20  = !ETH_PAGED ;  /* Addressing mode select */
+PIN 21  = ETH_RD ;      /* Read strobe for ENC624J600 */
+PIN 22  = ETH_WR ;      /* Write strobe for ENC624J600 */
+PIN 25  = LATCH_WR ;    /* Write strobe for paging latch */
+PIN 27  = !ROM_CS ;     /* Chip select for flash ROM */
+PIN 28  = !ROM_RD ;     /* Read strobe for flash ROM */
+PIN 30  = !ROM_WR ;     /* Write strobe for flash ROM */
+PIN 42  = ETH_PWR ;     /* 3.3V regulator enable */ 
+
+/* DATA PINS */
+PIN 43 = D0 ;
+PIN 44 = D1 ;
+
+/*
+RESERVED
+PIN 1   = TDI ;
+PIN 7   = TMS ;
+PIN 26  = TCK ;
+PIN 32  = TDO ;
+
+PIN 9   = VCC ;
+PIN 17  = VCC ;
+PIN 29  = VCC ;
+PIN 41  = VCC ;
+
+PIN 4   = GND ;
+PIN 16  = GND ;
+PIN 24  = GND ;
+PIN 36  = GND ;
+*/
+
+/* INTERNAL NODES */
+NODE interrupt_enable ;
+NODE power_enable ;
+NODE memc_cycle ;
+
+/*
+Inhibit power to the ENC624J600 from reset until the first access to its
+registers in IOC space. This is a workaround for its lack of hardware reset pin.
+Software must discard the result of this first access, and perform the power-on
+reset procedure described in Section 8.1 of the datasheet in order to determine
+when the chip is ready.
+*/
+power_enable.AR = RST ;
+power_enable.D = 'b'1 ;
+power_enable.CK = sel_eth ;
+ETH_PWR     = power_enable ;
+
+/*
+Disable interrupts from reset until we have seen a read to MEMC space. If the
+lack of a hardware reset pin isn't bad enough, the ENC624J600's interupt output
+does double duty as a configuration strapping pin, which will cause it to assert
+a spuriuos interrupt until the chip is initialised and driving the interrupt
+line. ARGH.
+*/
+interrupt_enable.AR = RST ;
+interrupt_enable.D = 'b'1 ;
+interrupt_enable.CK = MS & IORQ & IOGT ;
+PIRQ        = ETH_INT & interrupt_enable ;
+
+/* Chip-selects for IOC accesses */
+sel_rom     = PS & !LA13 ;                          /* 0000-1FFF : ROM */
+sel_latch   = PS &  LA13 & !LA12 & !LA11 & !LA10 ;  /* 2000-23FF : Paging latch */
+sel_ide1    = PS &  LA13 & !LA12 & !LA11 &  LA10 ;  /* 2400-27FF : IDE (8 bit registers) */
+sel_ide2    = PS &  LA13 & !LA12 &  LA11 ;          /* 2800-2FFF : IDE (8 bit high byte) */
+sel_ide3    = PS &  LA13 &  LA12 & !LA11 ;          /* 3000-37FF : IDE (16 bit) */
+sel_eth     = PS &  LA13 &  LA12 &  LA11 ;          /* 3800-3FFF : Ethernet */
+
+sel_ide     = sel_ide1 # sel_ide2 # sel_ide2 ;
+
+/* Control signals for flash ROM */
+ROM_CS      = 'b'1 ;             /* not actually needed */
+ROM_RD      = sel_rom & RW ;
+ROM_WR      = sel_rom & !RW ;
+
+/* Paging/IRQ register writes go to the paging latch */
+LATCH_WR    = sel_latch & !RW ;
+
+/* ... and we respond to reads with our internal IRQ bit */
+irq_rd      = sel_latch & RW ;
+
+/* Control signals for ENC624J600 (APPENDed for MEMC accesses below) */
+ETH_RD      = sel_eth & RW ;
+ETH_WR      = sel_eth & !RW ;
+
+/*
+Expose interrupt status on read of paging register.
+
+0 = no interrupt, 1 = interrupt
+
+D0     = ENC624J600 asserting interrupt
+D1     = reserved for IDE interrupts
+D2..D7 = undefined
+*/
+[D0..D1].oe = irq_rd ;
+D0          = PIRQ & ETH_INT ;
+D1          = 'b'0 ;
+
+/*
+We support two addressing modes for the ENC624J600 - register-only mode,
+addressed with LA2..9, and paged mode, addressed with LA2..13 and bits 6..7 of
+the patching latch. Register-only mode is used for IOC accesses to registers via
+3800-3FFF. Paged mode is used for MEMC accesses to allow direct (and faster)
+access to the full 32K of ENC624J600 address space. The ETH_PAGED output drives
+a buffer that selects between these modes.
+
+We make our 'default' state paged mode, to gives us as much time as possible for
+address setup on a MEMC access.
+*/
+ETH_PAGED   = !PS ;
+
+/*
+Control logic for MEMC accesses.
+
+There are some annoying subtleties here. Read the Acorn Enhanced Expansion Card
+Specification,
+(https://www.chiark.greenend.org.uk/~theom/riscos/docs/expspec.pdf), and chapter
+4 of the 1990 ARM databook
+(https://bitsavers.org/pdf/acorn/VTI_ARM_Databook_1990.pdf) for background.
+
+The ENC624J600 is fast enough (75ns read, 6.5ns write + 40ns holdoff) that we
+can always complete an access in one 250ns N-cycle. This means that we can
+acknowledge accesses immediately, giving faster access than is available with
+IOC-generated timings ('fast' IOC accesses are 500ns, and it gets slower from
+there). In theory we could complete an access in an S-cycle (125ns), but MEMC
+will only generate S-cycles for DRAM (and only when requested by the ARM), so an
+N-cycle is as good as we're gonna get.
+
+From our perspective, a MEMC access starts with /IORQ and /MS being asserted
+just before a falling REF8M. On the rising edge of REF8M, the MEMC samples
+/IOGT. If both /IORQ and /IOGT are asserted, then the cycle ends on the next
+falling edge of REF8M. Otherwise, MEMC stops the processor clock until this
+condition is met on a rising REF8M.
+
+When REF8M is high, MEMC may temporarily deassert /IORQ for some number of
+cycles, in order to perform VIDC DMA and refresh DRAM. We may assert /IOGT
+during this time, but the cycle will not end until MEMC reasserts /IORQ.
+
+To prevent DMA from interfering with the address and data lines to our card, we
+must also control the transparent latches between the I/O bus and the main data
+bus, using /BL. On writes, we should assert /BL on the rising edge of REF8M
+following assertion of /IORQ, to latch the address and data. On reads we should
+assert /BL when the device is ready (in our case, also on the rising REF8M), and
+keep asserting it until the end of the cycle. /BL must be released within 100ns
+of cycle end.
+*/
+
+/* MEMC cycle, starting at falling edge of REF8M */
+memc_cycle.AR = RST ;
+memc_cycle.CK = !REF8M ;
+memc_cycle.D  = MS & IORQ ;
+
+/* Latch data on rising REF8M, hold until end of cycle */
+BL            = memc_cycle & REF8M ;
+
+/* Assert IOGT immediately when we get IORQ */
+IOGT          = memc_cycle ;
+
+/* Assert write strobe for duration of write cycle */
+APPEND ETH_WR = memc_cycle & REF8M & !RW ;
+
+/*
+Since the half-period of REF8M (62.5ns) is shorter than the ENC624J600's read
+access time (75ns), we start read accesses asynchronously as soon as /MS and
+/IORQ are asserted together rather than waiting for REF8M. This gives us enough
+time to complete the read before REF8M goes high.
+*/
+APPEND ETH_RD = MS & IORQ & RW # memc_cycle & RW ;

@@ -1,0 +1,7 @@
+If "<InetSetup$Dir>" = "" Then Error "InetSetup$Dir not set"
+
+Copy <Obey$Dir>.AutoSense.EtherENC <InetSetup$Dir>.AutoSense.EtherENC f ~c
+CDir <System$Dir>.Modules.Network
+Copy <Obey$Dir>.EtherENC <System$Dir>.Modules.Network.EtherENC f ~c
+
+Echo |JEtherENC driver installed

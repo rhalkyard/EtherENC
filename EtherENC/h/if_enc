@@ -1,0 +1,121 @@
+/* Ethernet interface logic for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#ifndef _if_enc_h
+#define _if_enc_h
+
+#include "filter.h"
+#include "mbuf.h"
+
+#include "kernel.h"
+#include "netinet/if_ether.h"
+#include "sys/dcistructs.h"
+
+#define ENC_MFR 0x9635
+#define ENC_TYPE 0x3216
+
+#define ENC_IFNAME "enc"
+
+#define ENC_MAX_UNITS 4
+
+/* Bit fields for enc_context.flags */
+#define ENC_LINKUP (1 << 0)
+#define ENC_RUNNING (1 << 1)
+#define ENC_100MB (1 << 2)
+#define ENC_FULDPX (1 << 3)
+
+extern unsigned char enc_count;
+extern struct enc_context *enc_units[ENC_MAX_UNITS];
+
+/* Extra statistics for our driver */
+struct enc_stats {
+	struct stats base;
+	unsigned int tx_hwm;
+	unsigned int rx_hwm;
+	unsigned int irq_count;
+};
+
+struct enc_context {
+	void *pw; /* Private word of this module; used by IRQ veneer in s.glue */
+
+	volatile unsigned int *rom; /* Base address of ROM */
+	volatile unsigned char *irq; /* IRQ/Paging register */
+	volatile unsigned int *regs; /* Base address of registers */
+	volatile unsigned int *mem; /* Base address of paged buffer memory */
+	unsigned int cmos; /* Address of per-slot CMOS memory */
+
+	unsigned int rxptr; /* Receive buffer read pointer */
+	unsigned int flags; /* Device state */
+	unsigned int config; /* Configuration value from CMOS */
+
+	int slot;
+
+	int addresslevel;
+	int errorlevel;
+	struct filter *filters;
+
+	struct ifqueue if_snd;
+
+	struct dib dib;
+	struct enc_stats stats;
+
+	/* Data for DIB */
+	unsigned char hwaddr[6];
+	unsigned char location[20];
+};
+
+/* sizeof(struct ether_header) gives us 16, not 14! */
+#define ETH_HDRLEN 14
+/* ... and as a result sizeof(struct enc_pkthdr) is 24, not 22*/
+#define ENC_HDRLEN 22
+
+/* Packet header as it is stored on the ENC624J600 */
+struct enc_pkthdr {
+	unsigned short next; /* Address of next packet */
+	unsigned short length; /* Length of ethernet header and payload */
+	unsigned int flags; /* Receive status flags */
+	struct ether_header ether_header;
+};
+
+int enc_poweron(struct enc_context *ctx);
+
+void enc_reset(struct enc_context *ctx);
+
+_kernel_oserror *enc_selftest(struct enc_context *ctx);
+
+void enc_shutdown(struct enc_context *ctx);
+
+void enc_attach(struct enc_context *ctx, unsigned int slot);
+
+_kernel_oserror *enc_init(struct enc_context *ctx);
+
+_kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
+			      unsigned short frame_type, struct mbuf *mb,
+			      unsigned char *dest, unsigned char *source);
+
+_kernel_oserror *enc_stats(int flags, struct enc_context *ctx, void *buffer);
+
+int irqs_off(void);
+
+void irq_restore(int s);
+
+_kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw);
+
+void enc_get_hwaddr(struct enc_context *ctx, unsigned char *addr);
+
+#endif

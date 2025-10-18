@@ -1,0 +1,59 @@
+; Assembly language glue for EtherENC driver for RISC OS
+;
+; Copyright (C) 2025 Richard Halkyard
+;
+; This program is free software: you can redistribute it and/or modify it under
+; the terms of the GNU General Public License as published by the Free Software
+; Foundation, either version 3 of the License, or (at your option) any later
+; version.
+;
+; This program is distributed in the hope that it will be useful, but WITHOUT
+; ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+; FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+; details.
+;
+; You should have received a copy of the GNU General Public License along with
+; this program.  If not, see <https://www.gnu.org/licenses/>.
+
+        AREA    glue,PIC,CODE,REL,READONLY
+
+	EXPORT 	delay_us,call_handler,enc_isr_veneer0
+	IMPORT  enc_isr_veneer1
+        ALIGN
+
+; void delay_us(int us, unsigned char *podule_base_fast)
+;
+; A fast Podule access is 5 8MHz clock cycles = 0.625us. For simplicity's sake
+; let's just consider it 0.5us.
+
+delay_us        ROUT
+                MOV     r0, r0, LSL #2
+10
+                MOVEQS  pc, lr
+                LDRB    r3, [r1, #0]
+                SUBS    r0, r0, #1
+                B     %BT10
+
+; Glue function to call a protocol module's packet-handler callback with its
+; private word in R12
+; R0: pointer to DIB
+; R1: pointer to mbuf chain
+; R2: address of protocol-handler function
+; R3: protocol-handler's private word
+call_handler	ROUT
+		MOV r12,r3
+		MOV pc, r2
+
+; CMHG's veneers must be called with the R12 private word set to the module
+; workspace pointer; we can't use it for our own purposes. This prevents us
+; from passing a device context into the IRQ handler as we would like to. Get
+; around this storing the workspace pointer in the first element of the device
+; context (see struct enc_ctx in h.if_enc), and adding a 'pre-veneer' that puts
+; the context pointer in r0 and then replaces R12 with the private word as the
+; veneer expects. This devious trick was borrowed from the venerable Ether1
+; driver.
+enc_isr_veneer0	ROUT
+		MOV r0,r12
+		LDR r12,[r12]
+		B enc_isr_veneer1
+	END

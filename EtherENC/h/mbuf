@@ -1,0 +1,40 @@
+/* Mbuf helper code for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#ifndef _mbuf_h
+#define _mbuf_h
+
+/* NOTE: All other source should include THIS header, and not sys/mbuf.h, since
+ * MBCTL_NAME must be set correctly before including sys/mbuf.h. This also means
+ * that this header must be included before any other TCPIPLibs header that
+ * includes sys/mbuf.h (in partucluar, net/if.h and netinet/if_ether.h). Ugh
+ * what a mess.
+ */
+
+#include "kernel.h"
+
+#define MBCTL_NAME MBCTL
+#include "sys/mbuf.h"
+
+extern struct mbctl MBCTL;
+extern int mbufsession;
+
+void enc_stop_mbuf_session(void);
+_kernel_oserror *enc_start_mbuf_session(void);
+
+#endif

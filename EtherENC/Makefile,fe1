@@ -1,0 +1,67 @@
+# Comment these two lines out to build a release build.
+# DEBUG		Basic debug logging
+# RXDEBUG	Verbose (and slow) receive debug logging
+# TXDEBUG	Verbose (and slow) transmit debug logging
+# LADEBUG	Make dummy writes to ROM for logic-analyser capture
+# DbgDefines = -DDEBUG -DRXDEBUG -DTXDEBUG -DLADEBUG
+# DbgObjects = @.o.syslog
+
+# Other options
+Defines = $(DbgDefines)
+
+# Toolflags:
+CCflags = -c -depend !Depend -IC:,@.TCPIPLibs.include -throwback -zM -w -strict -Otime $(Defines)
+Linkflags = -m -o $@ 
+ObjAsmflags = -depend !Depend -Stamp -quit -CloseExec -throwback
+CMHGflags = -depend !Depend -IC:,@.TCPIPLibs.include -p $(Defines)
+LibFileflags = -c -o $@
+Squeezeflags = -o $@
+
+Objects = 	@.o.ModuleHdr \
+		@.o.module \
+		@.o.if_enc \
+		@.o.filter \
+		@.o.errors \
+		@.o.mbuf \
+		@.o.commands \
+		@.o.glue \
+		@.o.iocopy
+
+# Uncomment this line to generate generate assembled versions of C source
+# AsmCmd =	cc $(CCflags) -s -o @.c_s.$* @.c.$*
+
+all: @.EtherENC @.ENCRom $(asm)
+
+clean:
+	-Wipe @.o.* ~c
+	-Wipe @.c_s.* ~c
+	-Wipe @.h.ModuleHdr ~c
+	-Wipe @.EtherENC ~c
+	-Wipe @.ENCRom ~c
+
+# Final targets:
+@.EtherENC: $(Objects) $(DbgObjects) C:o.Stubs 
+	Link $(Linkflags) $(Objects) $(DbgObjects) C:o.Stubs
+
+@.ENCRom: @.MkROM @.EtherENC
+	Run @.MkROM
+
+# User-editable dependencies:
+
+h.ModuleHdr: o.ModuleHdr
+o.if_enc: h.ModuleHdr
+o.commands: h.ModuleHdr
+
+.SUFFIXES: .o .h .c .s .cmhg .c_s
+.c.o: o.ModuleHdr
+	cc $(CCflags) -o $@ @.c.$*
+	$(AsmCmd)
+
+.s.o:
+	ObjAsm $(ObjAsmflags) -o $@ @.s.$*
+
+.cmhg.o:
+	cmhg $(CMHGflags) -o $@ @.cmhg.$*
+
+.cmhg.h:
+	cmhg $(CMHGflags) -d $@ @.cmhg.$*

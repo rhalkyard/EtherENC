@@ -1,0 +1,466 @@
+/* Module entrypoints for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "commands.h"
+#include "debug.h"
+#include "enc_io.h"
+#include "enc_regs.h"
+#include "errors.h"
+#include "glue.h"
+#include "if_enc.h"
+#include "mbuf.h"
+#include "ModuleHdr.h"
+#include "os_defs.h"
+
+#include "ioc.h"
+#include "kernel.h"
+#include "stdlib.h"
+#include "swis.h"
+#include "sys/dcistructs.h"
+#include "sys/errno.h"
+
+#define UNUSED(x) ((void)x)
+
+unsigned char memc1a_flag = 1;
+
+unsigned char enc_count;
+struct enc_context *enc_units[ENC_MAX_UNITS];
+
+/* Actually start the driver, called through OS_AddCallBack on return of
+ * enc_initialise if MBufManager is already active, otherwise called in response
+ * to MBufManagerStarting service call.
+ */
+_kernel_oserror *startup_handler(_kernel_swi_regs *r, void *pw)
+{
+	unsigned char oldmbs, unit;
+	char var[8];
+	unsigned int length;
+
+	oldmbs = mbufsession;
+	enc_start_mbuf_session();
+	if ((oldmbs != mbufsession) && mbufsession) {
+		for (unit = 0; unit < enc_count; unit++)
+			if (enc_init(enc_units[unit]) == NULL) {
+				_swix(OS_ServiceCall, _INR(0, 3),
+				      &enc_units[unit]->dib,
+				      Service_DCIDriverStatus,
+				      DCIDriver_Starting, DCIVERSION);
+				DBGLOG(("EtherENC", 1,
+					"EtherENC started unit %d", unit));
+			}
+
+		/* Set the compatibility variable to the last starting driver */
+		length = sprintf(var, "%s0", ENC_IFNAME);
+		_swix(OS_SetVarVal, _INR(0, 4), "Inet$EtherType", var, length,
+		      0, 4);
+	} else {
+		DBGLOG(("EtherENC", 1, "Could not get mbuf session"));
+	}
+
+	return NULL;
+}
+
+_kernel_oserror *module_init(const char *cmd_tail, int podule_base, void *pw)
+{
+	unsigned char header[16];
+	unsigned short manufacturer, product;
+	int i, n_slots, slot;
+	unsigned int baseaddr;
+	unsigned int osver;
+	_kernel_oserror *error;
+	ioc_block *ioc;
+
+	DBGLOG(("EtherENC", 1, "EtherENC module init"));
+
+	/* Only allow one module instance */
+	if (podule_base == 1) {
+		error = enc_error(ENC_ERR_SINGLE_INSTANCE);
+		goto init_fail;
+	}
+
+	if ((_swix(Podule_ReturnNumber, _OUT(0), &n_slots) != NULL) ||
+	    (n_slots == 0)) {
+		error = enc_error(ENC_ERR_NO_PODULES);
+		goto init_fail;
+	}
+
+	/* Very early Archimedes machines may still have the original MEMC1 that
+	 * can't do LDM/STM to IO space. Determine whether this is the case, so
+	 * our I/O routines can take this into account. */
+	_swix(OS_Byte, _INR(0, 2) | _OUT(1), OsByte_OSVersionIdentifier, 0,
+	      0xFF, &osver);
+	if (osver <= 0xA4)
+		/* On RISC OS 3.1 and older, the byte at 0x112 indicates the
+		 * MEMC revision. 0 for MEMC1, 1 for MEMC1a */
+		memc1a_flag = *(unsigned char *)0x112;
+	else
+		/* Later RISC OS versions don't have the MEMC-revision byte, but
+		 * don't run on Archimedes-class machines anyway, so we know
+		 * we're OK.
+		 */
+		memc1a_flag = 1;
+
+	/* Locate the IOC. ioc.h gives us a hardcoded address for
+	 * Archimedes-class machines. Later machines that may have the IOC
+	 * registers elsewhere will support querying their location with the
+	 * OS_Memory SWI.
+	 */
+	ioc = IOC;
+	_swix(OS_Memory, _INR(0, 1) | _OUT(1), OSMemReason_IOSpace,
+	      4 << 8 /* SSpace0 */, &ioc);
+
+	/* Search all slots for our card(s) */
+	for (slot = 0; slot < n_slots; slot++) {
+		/* Skip empty slots */
+		if (_swix(Podule_ReadHeader, _INR(2, 3), header, slot) != NULL)
+			continue;
+
+		/* Look for our mfr and product ID */
+		manufacturer = header[5] | (header[6] << 8);
+		product = header[3] | (header[4] << 8);
+
+		if ((product != ENC_TYPE) || (manufacturer != ENC_MFR))
+			continue;
+
+		enc_units[enc_count] = malloc(sizeof(struct enc_context));
+		if (!enc_units[enc_count]) {
+			for (i = 0; i < enc_count; i++)
+				free(enc_units[i]);
+			error = enc_error(ENOMEM);
+			goto init_fail;
+		}
+		memset(enc_units[enc_count], 0, sizeof(struct enc_context));
+
+		/* Storing our module's private word in the first field of our
+		 * context struct makes life a lot easier in the interrupt
+		 * handler. See `irq_veneer0` in `s.glue` for more details
+		 */
+		enc_units[enc_count]->pw = pw;
+
+		enc_attach(enc_units[enc_count], slot);
+		if (enc_poweron(enc_units[enc_count])) {
+			free(enc_units[enc_count]);
+			error = enc_error(ENC_ERR_FAULTY);
+			continue;
+		}
+		enc_get_hwaddr(enc_units[enc_count],
+			       enc_units[enc_count]->hwaddr);
+		enc_units[enc_count]->dib.dib_inquire |= INQ_HWADDRVALID;
+
+		_swix(OS_ClaimDeviceVector, _INR(0, 4), 13, enc_isr_veneer0,
+		      enc_units[enc_count], enc_units[enc_count]->irq,
+		      IRQ_BIT_ETH);
+
+		if (++enc_count >= ENC_MAX_UNITS)
+			break;
+	}
+
+	/* A quick word on error handling - if enc_poweron fails, we likely have
+	 * a faulty or noncompliant device. We don't want this to be fatal,
+	 * since there might be another correctly-functioning interface in the
+	 * machine, but if the only interface (or every interface!) in the
+	 * system is faulty, the user probably wants to know about it. So, if we
+	 * encounter a faulty interface, we set an appropriate error and keep
+	 * looking. If we find other good interfaces, the error gets squelched
+	 * below and the module inits as normal. But if we don't find any good
+	 * interfaces, we propagate the error and fail the init.
+	 */
+
+	if (enc_count) {
+		/* Claiming a device vector doesn't unmask its interrupts! Have
+		 * to frob the appropriate mask bit in the IOC ourselves.
+		 */
+		ioc->irq_B.mask |= IRQB_XCB;
+		error = NULL;
+	} else {
+		if (!error)
+			error = enc_error(ENC_ERR_NO_DEVICE);
+		goto init_fail;
+	}
+
+	/* SUBTLETY ALERT: after initialising, the driver must announce its
+	 * presence with a DCIDriverStatus service call. However, it must only
+	 * do that after its SWIs are available, and RISC OS only makes a
+	 * module's SWIs available AFTER its init function returns. To get
+	 * around this, we add a delayed callback that registers our mbuf
+	 * session and issues the appropriate service call when the OS is about
+	 * to return to userspace.
+	 */
+	_swix(OS_AddCallBack, _INR(0, 1), startup_veneer, pw);
+
+	UNUSED(cmd_tail);
+
+	return NULL;
+
+init_fail:
+	enc_count = 0;
+	return error;
+}
+
+_kernel_oserror *module_fini(int fatal, int podule, void *pw)
+{
+	int unit;
+
+	_swix(OS_RemoveCallBack, _INR(0, 1), startup_veneer, pw);
+
+	for (unit = 0; unit < enc_count; unit++) {
+		_swix(OS_ServiceCall, _INR(0, 3), &enc_units[unit]->dib,
+		      Service_DCIDriverStatus, DCIDriver_Terminating,
+		      DCIVERSION);
+		enc_shutdown(enc_units[unit]);
+		_swix(OS_ReleaseDeviceVector, _INR(0, 4), 13, enc_isr_veneer0,
+		      enc_units[unit], enc_units[unit]->irq, IRQ_BIT_ETH);
+		free(enc_units[unit]);
+		enc_units[unit] = 0;
+	}
+	enc_count = 0;
+	enc_stop_mbuf_session();
+	return NULL;
+}
+
+void do_service(int service_number, _kernel_swi_regs *r, void *pw)
+{
+	unsigned char unit;
+
+	switch (service_number) {
+	case Service_MbufManagerStatus:
+		switch (r->r[0]) {
+		case MbufManagerStatus_Started:
+			/* MbufManager started after this module, so go do the
+			 * startup sideeffects.
+			 */
+			DBGLOG(("EtherENC", 1, "MbufManager started!"));
+			startup_handler(r, pw);
+			break;
+
+		case MbufManagerStatus_Stopping:
+			/* This might arrive if this module is the very last
+			 * client to stop, but since the session is only closed
+			 * in the finalisation handler it's probably safe to
+			 * ignore.
+			 */
+			break;
+
+		case MbufManagerStatus_Scavenge:
+		default:
+			break;
+		}
+		break;
+
+	case Service_EnumerateNetworkDrivers:
+		/* On entry:
+		 *		R0 = pointer to head of driver list
+		 * On exit:
+		 * 		R0 = pointer to new head of driver list
+		 */
+		/* Driver only useful if linked with MBufManager */
+		if (!mbufsession) {
+			break;
+		}
+		for (unit = 0; unit < enc_count; unit++) {
+			ChDib *chain;
+
+			/* Caller is responsible for freeing chain elements */
+			chain = malloc(sizeof(ChDib));
+			if (chain != NULL) {
+				chain->chd_dib = &enc_units[unit]->dib;
+				chain->chd_next = (ChDib *)r->r[0];
+				r->r[0] = (int)chain;
+			}
+		}
+		break;
+
+	case Service_PreReset:
+		/* Make sure the hardware can't interrupt during reset */
+		module_fini(-1, 0, pw);
+		break;
+
+	case Service_DCIProtocolStatus:
+		/* On entry:
+		 *		R0 = protocol module's private word pointer
+		 *		R2 = protocol status
+		 *		R3 = DCI version supported * 100
+		 *		R4 = pointer to protocol module title string
+		 */
+		if (((r->r[3] / 100) == (DCIVERSION / 100)) &&
+		    (r->r[2] == DCIProto_Terminating)) {
+			for (unit = 0; unit < enc_count; unit++) {
+				/* Remove any filters owned by the module */
+				filter_removemodule(enc_units[unit],
+						    (void *)r->r[0]);
+			}
+		}
+		break;
+	}
+}
+
+_kernel_oserror *do_command(const char *arg_string, int argc, int cmd_no,
+			    void *pw)
+{
+	switch (cmd_no) {
+	case CMD_ENCStats:
+		return cmd_stats(arg_string, argc);
+	case CMD_ENCTest:
+		return cmd_selftest(arg_string, argc);
+	case CMD_ENCFlow:
+		return cmd_flow(arg_string, argc);
+	case CMD_ENCLink:
+		return cmd_link(arg_string, argc);
+	default:
+		break;
+	}
+
+	return NULL;
+}
+
+_kernel_oserror *do_swi(int swi_offset, _kernel_swi_regs *r, void *pw)
+{
+	switch (EtherENC_00 + swi_offset) {
+	case EtherENC_DCIVersion:
+		/* 0: DCIDriver_DCIVersion
+		 * On entry:
+		 *	R0 = flags (all bits must be zero)
+		 * On exit:
+		 *	R1 = supported DCI version number
+		 */
+		if (r->r[0] != 0)
+			return enc_error(EINVAL);
+		r->r[1] = DCIVERSION;
+		break;
+
+	case EtherENC_Inquire:
+		/* 1: DCIDriver_Inquire
+		 * On entry:
+		 *	R0 = flags (all bits must be zero)
+		 *	R1 = unit number
+		 * On exit
+		 *	R2 = feature flags
+		 */
+		if (r->r[0] != 0)
+			return enc_error(EINVAL);
+		if (r->r[1] >= enc_count)
+			return enc_error(ENXIO);
+		r->r[2] = enc_units[r->r[1]]->dib.dib_inquire;
+		break;
+
+	case EtherENC_GetNetworkMTU:
+		/* 2: DCIDriver_GetNetworkMTU
+		 * On entry:
+		 *	R0 = flags (all bits must be zero)
+		 *	R1 = unit number
+		 * On exit:
+		 *	R3 = MTU
+		 */
+		if (r->r[0] != 0)
+			return enc_error(EINVAL);
+		if (r->r[1] >= enc_count)
+			return enc_error(ENXIO);
+		r->r[2] = ETHERMTU;
+		break;
+
+	case EtherENC_SetNetworkMTU:
+		/* 3: DCIDriver_SetNetworkMTU
+		 * On entry:
+		 * 	R0 = flags (all bits must be zero)
+		 * 	R1 = unit number
+		 * 	R3 = MTU
+		 *
+		 * We do not support changing the MTU
+		 */
+		if (r->r[0] != 0)
+			return enc_error(EINVAL);
+		if (r->r[1] >= enc_count)
+			return enc_error(ENXIO);
+		if (r->r[2] != ETHERMTU)
+			return enc_error(ENOTTY);
+		break;
+
+	case EtherENC_Transmit:
+		/* 4: DCIDriver_Transmit
+		 * On entry:
+		 *	R0 = flags
+		 *	R1 = unit number
+		 *	R2 = frame type
+		 * 	R3 = pointer to mbuf chain
+		 * 	R4 = pointer to destination hardware address
+		 * 	R5 = pointer to source hardware address (if applicable)
+		 */
+		if (r->r[0] >= TX_1STRESERVED)
+			return enc_error(EINVAL);
+		if (r->r[1] >= enc_count)
+			return enc_error(ENXIO);
+
+		return enc_transmit(r->r[0], enc_units[r->r[1]],
+				    (unsigned short)r->r[2],
+				    (struct mbuf *)r->r[3],
+				    (unsigned char *)r->r[4],
+				    (unsigned char *)r->r[5]);
+
+		break;
+
+	case EtherENC_Filter:
+		/* 5: DCIDriver_Filter
+		 * On entry:
+		 *	R0 = flags
+		 *	R1 = unit number
+		 *	R2 = frame type
+		 *	R3 = address level
+		 *	R4 = error level
+		 *	R5 = private word pointer
+		 *	R6 = address of handler routine
+		 */
+		if (r->r[0] >= FILTER_1STRESERVED)
+			return enc_error(EINVAL);
+		if (r->r[1] >= enc_count)
+			return enc_error(ENXIO);
+		if (r->r[0] & FILTER_RELEASE)
+			/* Release the filter */
+			return filter_remove(enc_units[r->r[1]], r->r[2],
+					     r->r[3], r->r[4],
+					     (filter_handler_t)r->r[6],
+					     (void *)r->r[5]);
+		else
+			/* Try to claim a filter */
+			return filter_add(enc_units[r->r[1]], r->r[2], r->r[3],
+					  r->r[4], (filter_handler_t)r->r[6],
+					  (void *)r->r[5]);
+
+		break;
+
+	case EtherENC_Stats:
+		/* 6: DCIDriver_Stats
+		 * On entry:
+		 *	R0 = flags
+		 *	R1 = unit number
+		 *	R2 = buffer to write stats into
+		 */
+		if (r->r[0] >= DCIDriverStats_1stReserved)
+			return enc_error(EINVAL);
+		if (r->r[1] >= enc_count)
+			return enc_error(ENXIO);
+		enc_stats(r->r[0], enc_units[r->r[1]], (struct stats *)r->r[2]);
+		break;
+
+	default:
+		return error_BAD_SWI;
+	}
+
+	UNUSED(pw);
+
+	return NULL;
+}

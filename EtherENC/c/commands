@@ -1,0 +1,353 @@
+/* Command handlers for EtherENC driver for RISC OS
+ *
+ * Copyright (C) 2025 Richard Halkyard
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "commands.h"
+#include "enc_regs.h"
+#include "errors.h"
+#include "if_enc.h"
+#include "ModuleHdr.h"
+#include "os_defs.h"
+
+#include "ctype.h"
+#include "kernel.h"
+#include "stdio.h"
+#include "swis.h"
+#include "sys/dcistructs.h"
+#include "sys/errno.h"
+
+static void print_filter(struct filter *f)
+{
+	unsigned int framelevel = GET_FRAMELEVEL(f->type);
+	unsigned int frametype = GET_FRAMETYPE(f->type);
+
+	switch (framelevel) {
+	case FRMLVL_E2SPECIFIC:
+		printf("%04x ", frametype);
+		break;
+	case FRMLVL_E2SINK:
+		printf("Sink ");
+		break;
+	case FRMLVL_E2MONITOR:
+		printf("Monitor ");
+		break;
+	case FRMLVL_IEEE:
+		printf("IEEE 802.3 ");
+		break;
+	default:
+		printf("[unknown framelevel] ");
+		break;
+	}
+
+	switch (f->addresslevel) {
+	case ADDRLVL_SPECIFIC:
+		printf("Unicast ");
+		break;
+	case ADDRLVL_NORMAL:
+		printf("Normal ");
+		break;
+	case ADDRLVL_MULTICAST:
+		printf("Multicast ");
+		break;
+	case ADDRLVL_PROMISCUOUS:
+		printf("Promiscuous ");
+		break;
+	default:
+		printf("[Unknown addrlevel] ");
+		break;
+	}
+
+	printf("PW=%07x Handler=%07x\n", f->pw, f->handler);
+}
+
+static void print_stats(struct enc_context *ctx)
+{
+	struct enc_stats stats;
+	struct filter *f;
+	unsigned int id, rev, econ1, erxfcon;
+	_swi(EtherENC_Stats, _INR(0, 2), DCIDriverStats_GetENCStats,
+	     ctx->dib.dib_unit, (void *)&stats);
+	id = (ENC_READ_REG(ctx->regs, EIDLED) & EIDLED_DEVID_MASK) >>
+	     EIDLED_DEVID_SHIFT;
+	rev = (ENC_READ_REG(ctx->regs, EIDLED) & EIDLED_REVID_MASK) >>
+	      EIDLED_REVID_SHIFT;
+	econ1 = ENC_READ_REG(ctx->regs, ECON1);
+	erxfcon = ENC_READ_REG(ctx->regs, ERXFCON);
+
+	printf("EtherENC unit %s%d in %s\n", ctx->dib.dib_name,
+	       ctx->dib.dib_unit, ctx->dib.dib_location);
+	printf("Hardware address: %02x:%02x:%02x:%02x:%02x:%02x\n",
+	       ctx->hwaddr[0], ctx->hwaddr[1], ctx->hwaddr[2], ctx->hwaddr[3],
+	       ctx->hwaddr[4], ctx->hwaddr[5]);
+	printf("ENC chip id &%x, revision &%02x\n", id, rev);
+	printf("Status:\n");
+	printf("\tHardware %s most recent self-test\n",
+	       (ctx->stats.base.st_link_status & ST_STATUS_OK) ? "passed" :
+								 "failed");
+	printf("\tDriver %s\n",
+	       (ctx->flags & ENC_RUNNING) ? "running" : "inactive");
+	printf("\tLink %s", (ctx->flags & ENC_LINKUP) ? "up" : "down");
+	if (ctx->flags & ENC_LINKUP) {
+		printf(", %sM, %s duplex %s\n",
+		       (ctx->flags & ENC_100MB) ? "100" : "10",
+		       (ctx->flags & ENC_FULDPX) ? "Full" : "Half",
+		       (ctx->config & CONFIG_LINK_MANUAL) ? "(Manual)" :
+							    "(Auto)");
+		if (!(ctx->flags & ENC_100MB))
+			printf(", %s polarity",
+			       ctx->stats.base.st_link_polarity ? "correct" :
+								  "inverted");
+	} else {
+		printf("\n");
+	}
+	printf("\tReceive mode: ");
+	if (!(econ1 & ECON1_RXEN)) {
+		printf("off");
+	} else {
+		if (erxfcon & ERXFCON_UCEN)
+			printf("unicast ");
+		if (erxfcon & ERXFCON_MCEN)
+			printf("multicast ");
+		if (erxfcon & ERXFCON_BCEN)
+			printf("broadcast ");
+		if (erxfcon & ERXFCON_NOTMEEN)
+			printf("not-me ");
+	}
+	printf("\n");
+
+	if (ctx->filters) {
+		printf("\nProtocol handlers:\n");
+		f = ctx->filters;
+		while (f) {
+			printf("\t");
+			print_filter(f);
+			f = f->next;
+		}
+	} else {
+		printf("No protocol handlers installed\n");
+	}
+
+	printf("\nLink failures: %d\n", stats.base.st_link_failures);
+	printf("Interrupt count: %d\n", stats.irq_count);
+
+	printf("\nTotal TX frames: %d\n", stats.base.st_tx_frames);
+	printf("Total TX bytes: %d\n", stats.base.st_tx_bytes);
+	printf("Total TX errors: %d\n", stats.base.st_tx_general_errors);
+	printf("TX queue high water mark: %d\n\n", stats.tx_hwm);
+
+	printf("Total RX frames: %d\n", stats.base.st_rx_frames);
+	printf("Total RX bytes: %d\n", stats.base.st_rx_bytes);
+	printf("Total RX dropped frames: %d\n", stats.base.st_dropped_frames);
+	printf("Total RX unwanted frames: %d\n", stats.base.st_unwanted_frames);
+	printf("RX queue high water mark: %d\n\n", stats.rx_hwm);
+
+	return;
+}
+
+_kernel_oserror *cmd_stats(const char *arg_string, int argc)
+{
+	int unit;
+
+	if (argc == 0) {
+		for (unit = 0; unit < enc_count; unit++)
+			print_stats(enc_units[unit]);
+	} else {
+		unit = atoi(arg_string);
+		if (unit >= 0 && unit < enc_count)
+			print_stats(enc_units[unit]);
+		else
+			return enc_error(ENXIO);
+	}
+
+	return NULL;
+}
+
+static _kernel_oserror *do_test(struct enc_context *ctx)
+{
+	_kernel_oserror *err;
+	printf("Testing unit %s%d... ", ctx->dib.dib_name, ctx->dib.dib_unit);
+	err = enc_selftest(ctx);
+	if (err == NULL)
+		printf("OK\n");
+	else
+		printf("FAILED: %s\n", err->errmess);
+	return err;
+}
+
+_kernel_oserror *cmd_selftest(const char *arg_string, int argc)
+{
+	_kernel_oserror *err = NULL;
+	int unit;
+
+	if (argc == 0) {
+		for (unit = 0; unit < enc_count; unit++)
+			do_test(enc_units[unit]);
+	} else {
+		unit = atoi(arg_string);
+		if (unit >= 0 && unit < enc_count)
+			err = do_test(enc_units[unit]);
+		else
+			err = enc_error(ENXIO);
+	}
+	return err;
+}
+
+_kernel_oserror *cmd_flow(const char *arg_string, int argc)
+{
+	int unit, i;
+	unsigned char config;
+	struct {
+		char *argv[2];
+		char buf[64];
+	} readargs;
+	_kernel_oserror *err;
+
+	if (arg_string == arg_STATUS) {
+		for (unit = 0; unit < enc_count; unit++) {
+			err = _swix(OS_Byte, _INR(0, 1) | _OUT(2),
+				    OSByte_ReadCMOS, enc_units[unit]->cmos,
+				    &config);
+			if (err)
+				return NULL;
+			printf("ENCFlow\t\t%d %s\n", unit,
+			       (config & CONFIG_FLOW_ON) ? "On" : "Off");
+		}
+	} else if (arg_string == arg_CONFIGURE_SYNTAX) {
+		printf("ENCFlow\t\t<unit> On|Off\n");
+	} else {
+		err = _swix(OS_ReadArgs, _INR(0, 3), "/A,/A", arg_string,
+			    &readargs, sizeof(readargs));
+		if (err)
+			return err;
+
+		for (i = 0; i < sizeof(readargs.buf); i++)
+			readargs.buf[i] = toupper(readargs.buf[i]);
+
+		err = _swix(OS_ReadUnsigned, _INR(0, 2) | _OUT(2),
+			    10 | (1 << 29), readargs.argv[0], enc_count - 1,
+			    &unit);
+		if (err)
+			return err;
+
+		err = _swix(OS_Byte, _INR(0, 1) | _OUT(2), OSByte_ReadCMOS,
+			    enc_units[unit]->cmos, &config);
+		if (err)
+			return err;
+
+		if (!strcmp(readargs.argv[1], "ON"))
+			config |= CONFIG_FLOW_ON;
+		else if (!strcmp(readargs.argv[1], "OFF"))
+			config &= ~CONFIG_FLOWMASK;
+		else
+			return configure_BAD_OPTION;
+
+		err = _swix(OS_Byte, _INR(0, 2), OSByte_WriteCMOS,
+			    enc_units[unit]->cmos, config);
+		if (err)
+			return err;
+	}
+	return NULL;
+}
+
+_kernel_oserror *cmd_link(const char *arg_string, int argc)
+{
+	int unit, i, match;
+	unsigned char config;
+	struct {
+		char *argv[3];
+		char buf[64];
+	} readargs;
+	_kernel_oserror *err;
+
+	if (arg_string == arg_STATUS) {
+		for (unit = 0; unit < enc_count; unit++) {
+			err = _swix(OS_Byte, _INR(0, 1) | _OUT(2),
+				    OSByte_ReadCMOS, enc_units[unit]->cmos,
+				    &config);
+			if (err)
+				return NULL;
+			printf("ENCLink\t\t%d %s %s\n", unit,
+			       (config & CONFIG_LINK_MANUAL) ?
+				       (config & CONFIG_LINK_100) ? "100" :
+								    "10" :
+				       "Auto",
+			       (config & CONFIG_LINK_MANUAL) ?
+				       (config & CONFIG_LINK_FULL) ? "Full" :
+								     "Half" :
+				       "");
+		}
+	} else if (arg_string == arg_CONFIGURE_SYNTAX) {
+		printf("ENCLink\t\t<unit> Auto | 10 Half|Full | 100 Half|Full\n");
+	} else {
+		err = _swix(OS_ReadArgs, _INR(0, 3), "/A,/A,", arg_string,
+			    &readargs, sizeof(readargs));
+		if (err)
+			return err;
+
+		for (i = 0; i < sizeof(readargs.buf); i++)
+			readargs.buf[i] = toupper(readargs.buf[i]);
+
+		err = _swix(OS_ReadUnsigned, _INR(0, 2) | _OUT(2),
+			    10 | (1 << 29), readargs.argv[0], enc_count - 1,
+			    &unit);
+		if (err)
+			return err;
+
+		err = _swix(OS_Byte, _INR(0, 1) | _OUT(2), OSByte_ReadCMOS,
+			    enc_units[unit]->cmos, &config);
+		if (err)
+			return err;
+
+		config &= ~CONFIG_LINKMASK;
+		match = 0;
+		if (!strcmp(readargs.argv[1], "AUTO")) {
+			match = 1;
+		}
+		if (!strcmp(readargs.argv[1], "10")) {
+			match = 1;
+			config |= CONFIG_LINK_MANUAL;
+		}
+		if (!strcmp(readargs.argv[1], "100")) {
+			match = 1;
+			config |= CONFIG_LINK_100;
+		}
+		if (!match)
+			return configure_BAD_OPTION;
+
+		if (readargs.argv[2]) {
+			if (!(config & CONFIG_LINK_MANUAL))
+				return configure_BAD_OPTION;
+
+			match = 0;
+			if (!strcmp(readargs.argv[2], "HALF")) {
+				match = 1;
+			}
+			if (!strcmp(readargs.argv[2], "FULL")) {
+				match = 1;
+				config |= CONFIG_LINK_FULL;
+			}
+			if (!match)
+				return configure_BAD_OPTION;
+		}
+
+		err = _swix(OS_Byte, _INR(0, 2), OSByte_WriteCMOS,
+			    enc_units[unit]->cmos, config);
+		if (err)
+			return err;
+	}
+	return NULL;
+}
