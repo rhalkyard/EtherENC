@@ -32,7 +32,7 @@ others!
 
 ## Hardware
 
-See [HARDWARE.md](hardware.md) for a design overview.
+See [HARDWARE.md](HARDWARE.md) for a design overview.
 
 Schematic in PDF format can be found at
 [pcb/EtherENC-prototype/EtherENC-Prototype.pdf](pcb/EtherENC-prototype/EtherENC-Prototype.pdf).
@@ -164,3 +164,4 @@ Public License Version 3, with the following exceptions:
 - [Ether1 (AMD LANCE-based card) driver source](https://gitlab.riscosopen.org/RiscOS/Sources/Networking/Ethernet/Ether1)
 
 - [EtherY (LAN91C111-based card) driver source](https://gitlab.riscosopen.org/RiscOS/Sources/Networking/Ethernet/EtherY/)
+
