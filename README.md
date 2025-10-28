@@ -11,9 +11,17 @@ Archimedes and Risc PC machines.
 ## Project Status
 
 Early days yet! I have the driver functioning on a prototype version of the
-card, but enough bodges were necessary with the prototype hardware that I do not
-feel comfortable releasing it in its present form. Once the revised design is
-finalised, schematics and board layouts will be made available in this repo.
+card, but there are enough issues that it'll need a redone board before I'm
+truly happy with it.
+
+Meanwhile, someone else in the Acorn community who has access to a lot more
+hardware for testing, has [announced his own open-source Ethernet
+podule](https://www.stardot.org.uk/forums/viewtopic.php?p=468283). To be
+brutally honest, his design is probably the sensible path forward, and there
+probably isn't room for two very similar projects in such a small community, so
+this project's future is in question. However, I'm proud of what I accomplished,
+my design works well (in my opinion), and I think it's worth saving for
+posterity, so here it is.
 
 ## Supported Systems
 
