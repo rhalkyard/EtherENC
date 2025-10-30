@@ -140,10 +140,10 @@ mode is used to expose just the ENC624J600's registers in IOC space at
 `3800-38FF`.
 
 The ENC624J600 is a 3.3V device, with 5V-tolerant I/O. Its 3.3V supply is
-provided by an onboard LDO regulator with an Enable input under control of the
-ATF1502. 3.3V power is disabled at reset, and restored on the first access to
-the ENC624J600; this is used to work around the ENC624J600's lack of a hardware
-reset pin.
+provided by an onboard LDO regulator. In future hardware revisions, a regulator
+with an Enable input under control of the ATF1502. This will be used to work
+around the ENC624J600's lack of a hardware reset pin, by power-on-resetting the
+chip when the Podule `/RST` line is asserted.
 
 All components are tolerant of 500ns 'fast' accesses (and all slower access
 modes too). 250ns timing is used for MEMC-space accesses to the ENC624J600,
