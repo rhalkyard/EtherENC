@@ -19,7 +19,8 @@
 #ifndef _debug_h
 #define _debug_h
 
-#if !defined(DEBUG) && (defined(TXDBG) || defined(RXDBG) || defined(IRQDBG))
+#if !defined(DEBUG) && \
+	(defined(TXDEBUG) || defined(RXDEBUG) || defined(IRQDEBUG))
 #define DEBUG
 #endif
 
