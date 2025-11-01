@@ -34,10 +34,11 @@
 #define ENC_MAX_UNITS 4
 
 /* Bit fields for enc_context.flags */
-#define ENC_LINKUP (1 << 0)
-#define ENC_RUNNING (1 << 1)
-#define ENC_100MB (1 << 2)
-#define ENC_FULDPX (1 << 3)
+#define ENC_LINKUP (1 << 0)		/* Physical link is up */
+#define ENC_RUNNING (1 << 1)		/* Driver is running */
+#define ENC_100MB (1 << 2)		/* Link is 100 Megabit */
+#define ENC_FULDPX (1 << 3)		/* Link is full duplex */
+#define ENC_TXBUSY (1 << 4)		/* Transmitter is currently busy */
 
 extern unsigned char enc_count;
 extern struct enc_context *enc_units[ENC_MAX_UNITS];
@@ -60,7 +61,7 @@ struct enc_context {
 	unsigned int cmos; /* Address of per-slot CMOS memory */
 
 	unsigned int rxptr; /* Receive buffer read pointer */
-	unsigned int flags; /* Device state */
+	unsigned int flags; /* Device state - ONLY WRITE WITH IRQS DISABLED */
 	unsigned int config; /* Configuration value from CMOS */
 
 	int slot;
@@ -111,6 +112,8 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 _kernel_oserror *enc_stats(int flags, struct enc_context *ctx, void *buffer);
 
 int irqs_off(void);
+
+int irqs_on(void);
 
 void irq_restore(int s);
 

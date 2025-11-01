@@ -20,6 +20,7 @@
 #include "enc_io.h"
 #include "enc_regs.h"
 #include "errors.h"
+#include "glue.h"
 #include "if_enc.h"
 #include "iocopy.h"
 #include "mbuf.h"
@@ -65,8 +66,15 @@ int irqs_off(void)
 {
 	int s = _kernel_irqs_disabled();
 	_kernel_irqs_off();
-	if (!s)
-		DBGLA(*(volatile unsigned int *)0x3340000, DBG_IOFF);
+	DBGLA(*(volatile unsigned int *)0x3340000, DBG_IOFF);
+	return s;
+}
+
+int irqs_on(void)
+{
+	int s = _kernel_irqs_disabled();
+	_kernel_irqs_on();
+	DBGLA(*(volatile unsigned int *)0x3340000, DBG_ION);
 	return s;
 }
 
@@ -74,6 +82,7 @@ void irq_restore(int s)
 {
 	if (s) {
 		_kernel_irqs_off();
+		DBGLA(*(volatile unsigned int *)0x3340000, DBG_IOFF);
 	} else {
 		_kernel_irqs_on();
 		DBGLA(*(volatile unsigned int *)0x3340000, DBG_ION);
@@ -199,11 +208,12 @@ static void enc_link_update(struct enc_context *ctx)
 		PHSTAT3_SPDDPX_SHIFT;
 	unsigned int polarity =
 		!!(enc_read_phy_reg(ctx, PHSTAT2) & PHSTAT2_PLRITY);
+	unsigned int s;
 	char *linkstate;
 	char *linkspeed;
 	char *linkdpx;
 
-	/* Get link state info. */
+	s = irqs_off();
 	if (estat & ESTAT_PHYLNK) {
 		linkstate = "up";
 		ctx->flags |= ENC_LINKUP;
@@ -241,6 +251,7 @@ static void enc_link_update(struct enc_context *ctx)
 		ctx->flags &= ~ENC_FULDPX;
 		break;
 	}
+	irq_restore(s);
 
 	ctx->stats.base.st_link_polarity = polarity ? 1 : 0;
 
@@ -458,15 +469,21 @@ static void enc_start_tx(struct enc_context *ctx)
 	struct mbuf *top, *m;
 	unsigned int len, econ1, state;
 	int s;
-	DBGLA(ctx->rom[0], DBG_TXSTART);
-
-	if (ENC_READ_REG(ctx->regs, ECON1) & ECON1_TXRTS)
-		goto done;
 
 	s = irqs_off();
+	if (ctx->flags & ENC_TXBUSY) {
+		irq_restore(s);
+		return;
+	}
 	IF_DEQUEUE(&ctx->if_snd, top);
-	if (!top)
-		goto done;
+	if (!top) {
+		irq_restore(s);
+		return;
+	}
+	ctx->flags |= ENC_TXBUSY;
+	irq_restore(s);
+
+	DBGLA(ctx->rom[0], DBG_TXSTART);
 
 	len = 0;
 	m = top;
@@ -484,9 +501,7 @@ static void enc_start_tx(struct enc_context *ctx)
 	ctx->stats.base.st_tx_frames += 1;
 	ctx->stats.base.st_tx_bytes += len;
 	m_freem(top);
-done:
 	DBGLA(ctx->rom[0], DBG_TXDONE);
-	irq_restore(s);
 }
 
 _kernel_oserror *enc_selftest(struct enc_context *ctx)
@@ -499,7 +514,6 @@ _kernel_oserror *enc_selftest(struct enc_context *ctx)
 	rxen = ENC_READ_REG(ctx->regs, ECON1) & ECON1_RXEN;
 	ENC_CLEAR_BITS(ctx->regs, ECON1, ECON1_RXEN);
 
-	/* Wait for all received packets to have been processed */
 	eie = ENC_READ_REG(ctx->regs, EIE);
 	if ((ctx->flags & ENC_RUNNING) && (eie & EIE_INTIE) &&
 	    (eie & EIE_PKTIE))
@@ -562,7 +576,7 @@ void enc_shutdown(struct enc_context *ctx)
 		IF_DEQUEUE(&ctx->if_snd, m);
 		m_freem(m);
 	}
-	ctx->flags &= ~ENC_RUNNING;
+	ctx->flags = 0;
 	ctx->stats.base.st_link_status &= ~ST_STATUS_ACTIVE;
 	enc_reset(ctx);
 	irq_restore(s);
@@ -599,14 +613,6 @@ void enc_attach(struct enc_context *ctx, unsigned int slot)
 			       INQ_SOFTHWADDR | INQ_HASSTATS;
 
 	enc_config_read(ctx);
-}
-
-/* Bring up an interface */
-_kernel_oserror *enc_init(struct enc_context *ctx)
-{
-	unsigned int tmp, rx_tail, flow_hwm, flow_lwm;
-	_kernel_oserror *err;
-	DBGLOG(("EtherENC", 1, "init unit %d", ctx->dib.dib_unit));
 
 	ctx->flags = 0;
 	ctx->addresslevel = ADDRLVL_SPECIFIC;
@@ -614,10 +620,14 @@ _kernel_oserror *enc_init(struct enc_context *ctx)
 
 	memset(&ctx->stats, 0, sizeof(struct enc_stats));
 	ctx->stats.base.st_interface_type = ST_TYPE_10BASET;
+}
 
-	err = enc_selftest(ctx);
-	if (err)
-		return err;
+/* Bring up an interface */
+_kernel_oserror *enc_init(struct enc_context *ctx)
+{
+	unsigned int tmp, rx_tail, flow_hwm, flow_lwm, s;
+	_kernel_oserror *err;
+	DBGLOG(("EtherENC", 1, "init unit %d", ctx->dib.dib_unit));
 
 	ctx->stats.base.st_link_status |= ST_STATUS_ACTIVE;
 
@@ -660,7 +670,9 @@ _kernel_oserror *enc_init(struct enc_context *ctx)
 	ENC_SET_BITS(ctx->regs, EIE,
 		     EIE_INTIE | EIE_LINKIE | EIE_PKTIE | EIE_TXIE |
 			     EIE_TXABTIE | EIE_RXABTIE | EIE_PCFULIE);
+	s = irqs_off();
 	ctx->flags |= ENC_RUNNING;
+	irq_restore(s);
 
 	return NULL;
 }
@@ -885,18 +897,25 @@ done:
 	DBGLA(ctx->rom[0], DBG_RXDONE);
 }
 
+/* Ethernet interrupts are frequent and potentially time-consuming, but not
+ * especially high priority. To avoid unacceptable interrupt latency in the rest
+ * of the system, our IRQ handler deasserts our card's IRQ, and then re-enables
+ * interrupts while servicing our card, so other hardware can interrupt it.
+ */
 _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 {
 	/* irq_veneer0 puts the context pointer in r0 for us */
 	struct enc_context *ctx = (struct enc_context *)r->r[0];
 	unsigned int eir = ENC_READ_REG(ctx->regs, EIR);
-	unsigned int pktcnt, i;
+	unsigned int pktcnt, i, s, s2;
 	DBGIRQ(1);
 #ifdef IRQDEBUG
 	DBGLOG(("EtherENC", 1, "Entered ISR"));
 #endif
 	ctx->stats.irq_count += 1;
 	DBGLA(ctx->rom[0], DBG_IRQENTER);
+	ENC_CLEAR_BITS(ctx->regs, EIE, EIE_INTIE);
+	s = irqs_on();
 
 	if (eir & EIR_LINKIF) {
 		/* Link state changed */
@@ -905,12 +924,15 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 	}
 
 	if (eir & (EIR_TXIF | EIR_TXABTIF)) {
-		/* Successful TX */
+		/* TX completed */
 		if (eir & EIR_TXABTIF) {
 			ctx->stats.base.st_tx_general_errors += 1;
 			DBGLOG(("EtherENC", 1, "TX aborted"));
 		}
 		ENC_CLEAR_BITS(ctx->regs, EIR, EIR_TXIF | EIR_TXABTIF);
+		s2 = irqs_off();
+		ctx->flags &= ~ENC_TXBUSY;
+		irq_restore(s2);
 		enc_start_tx(ctx);
 	}
 
@@ -934,6 +956,9 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 #ifdef IRQDEBUG
 	DBGLOG(("EtherENC", 1, "Finished ISR"));
 #endif
+
+	irq_restore(s);
+	ENC_SET_BITS(ctx->regs, EIE, EIE_INTIE);
 	DBGLA(ctx->rom[0], DBG_IRQLEAVE);
 	DBGIRQ(0);
 }

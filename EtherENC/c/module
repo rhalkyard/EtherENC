@@ -158,6 +158,12 @@ _kernel_oserror *module_init(const char *cmd_tail, int podule_base, void *pw)
 			error = enc_error(ENC_ERR_FAULTY);
 			continue;
 		}
+		error = enc_selftest(enc_units[enc_count]);
+		if (error) {
+			free(enc_units[enc_count]);
+			continue;
+		}
+		
 		enc_get_hwaddr(enc_units[enc_count],
 			       enc_units[enc_count]->hwaddr);
 		enc_units[enc_count]->dib.dib_inquire |= INQ_HWADDRVALID;
@@ -170,15 +176,16 @@ _kernel_oserror *module_init(const char *cmd_tail, int podule_base, void *pw)
 			break;
 	}
 
-	/* A quick word on error handling - if enc_poweron fails, we likely have
-	 * a faulty or noncompliant device. We don't want this to be fatal,
-	 * since there might be another correctly-functioning interface in the
-	 * machine, but if the only interface (or every interface!) in the
-	 * system is faulty, the user probably wants to know about it. So, if we
-	 * encounter a faulty interface, we set an appropriate error and keep
-	 * looking. If we find other good interfaces, the error gets squelched
-	 * below and the module inits as normal. But if we don't find any good
-	 * interfaces, we propagate the error and fail the init.
+	/* A quick word on error handling - if enc_poweron or enc_selftest
+	 * fails, we likely have a faulty or noncompliant device. We don't want
+	 * this to be fatal, since there might be another correctly-functioning
+	 * interface in the machine, but if the only interface (or every
+	 * interface!) in the system is faulty, the user probably wants to know
+	 * about it. So, if we encounter a faulty interface, we set an
+	 * appropriate error and keep looking. If we find other good interfaces,
+	 * the error gets squelched below and the module inits as normal. But if
+	 * we don't find any good interfaces, we propagate the error and fail
+	 * the init.
 	 */
 
 	if (enc_count) {
