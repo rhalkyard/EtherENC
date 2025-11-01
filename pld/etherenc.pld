@@ -1,4 +1,4 @@
-Name     EtherPodule ;
+Name     EtherENC ;
 PartNo   00 ;
 Date     6/18/2024 ;
 Revision 01 ;
@@ -93,6 +93,7 @@ PIN 36  = GND ;
 NODE interrupt_enable ;
 NODE power_enable ;
 NODE memc_cycle ;
+NODE memc_late ;
 
 /*
 Inhibit power to the ENC624J600 from reset until the first access to its
@@ -100,6 +101,9 @@ registers in IOC space. This is a workaround for its lack of hardware reset pin.
 Software must discard the result of this first access, and perform the power-on
 reset procedure described in Section 8.1 of the datasheet in order to determine
 when the chip is ready.
+
+This is not used currently, but intended for a future revision and included here
+for testing purposes.
 */
 power_enable.AR = RST ;
 power_enable.D = 'b'1 ;
@@ -115,7 +119,7 @@ line. ARGH.
 */
 interrupt_enable.AR = RST ;
 interrupt_enable.D = 'b'1 ;
-interrupt_enable.CK = MS & IORQ & IOGT ;
+interrupt_enable.CK = memc_cycle ;
 PIRQ        = ETH_INT & interrupt_enable ;
 
 /* Chip-selects for IOC accesses */
@@ -130,18 +134,18 @@ sel_ide     = sel_ide1 # sel_ide2 # sel_ide2 ;
 
 /* Control signals for flash ROM */
 ROM_CS      = 'b'1 ;             /* not actually needed */
-ROM_RD      = sel_rom & RW ;
-ROM_WR      = sel_rom & !RW ;
+ROM_RD      = sel_rom & IORD ;
+ROM_WR      = sel_rom & IOWR ;
 
 /* Paging/IRQ register writes go to the paging latch */
-LATCH_WR    = sel_latch & !RW ;
+LATCH_WR    = sel_latch & IOWR ;
 
 /* ... and we respond to reads with our internal IRQ bit */
-irq_rd      = sel_latch & RW ;
+irq_rd      = sel_latch & IORD ;
 
 /* Control signals for ENC624J600 (APPENDed for MEMC accesses below) */
-ETH_RD      = sel_eth & RW ;
-ETH_WR      = sel_eth & !RW ;
+ETH_RD      = sel_eth & IORD;
+ETH_WR      = sel_eth & IOWR ;
 
 /*
 Expose interrupt status on read of paging register.
@@ -172,57 +176,102 @@ ETH_PAGED   = !PS ;
 /*
 Control logic for MEMC accesses.
 
-There are some annoying subtleties here. Read the Acorn Enhanced Expansion Card
+There are some subtleties here - early ARM is truly RISC-y when it comes to its
+bus interface, and talking to it correctly without mediation from IOC is not as
+straightforward as, say the 68K or x86. Read the Acorn Enhanced Expansion Card
 Specification,
 (https://www.chiark.greenend.org.uk/~theom/riscos/docs/expspec.pdf), and chapter
 4 of the 1990 ARM databook
 (https://bitsavers.org/pdf/acorn/VTI_ARM_Databook_1990.pdf) for background.
 
-The ENC624J600 is fast enough (75ns read, 6.5ns write + 40ns holdoff) that we
-can always complete an access in one 250ns N-cycle. This means that we can
-acknowledge accesses immediately, giving faster access than is available with
-IOC-generated timings ('fast' IOC accesses are 500ns, and it gets slower from
-there). In theory we could complete an access in an S-cycle (125ns), but MEMC
-will only generate S-cycles for DRAM (and only when requested by the ARM), so an
-N-cycle is as good as we're gonna get.
+TL;DR, there are five key signals:
+
+    /MS     - MEMC access select for this Podule
+    /IORQ   - MEMC IO handshake request
+    /IOGT   - MEMC IO handshake grant
+    /BL     - Data latch control
+    REF8M   - 8MHz MEMC reference clock 
 
 From our perspective, a MEMC access starts with /IORQ and /MS being asserted
-just before a falling REF8M. On the rising edge of REF8M, the MEMC samples
-/IOGT. If both /IORQ and /IOGT are asserted, then the cycle ends on the next
-falling edge of REF8M. Otherwise, MEMC stops the processor clock until this
-condition is met on a rising REF8M.
+while REF8M is high. Acorn's documentation explictly states that this can be
+used to trigger the start of the cycle asynchronously, without waiting for a
+falling REF8M. On the next rising edge of REF8M, MEMC samples /IOGT. If /IOGT is
+asserted, then the cycle ends on the falling edge of REF8M. Otherwise, MEMC
+stops the ARM clock and samples /IOGT on each rising REF8M until this condition
+is met. So far, this is more or less the same as the 68000's /DTACK handshake.
+However, MEMC allows DMA and DRAM refresh to occur during I/O wait states, and
+it is incumbent on I/O devices to handle the implications of this. For regular
+Podule accesses, IOC takes care of this behind the scenes, but when accessing a
+Podule directly through MEMC, it's up to us.
 
-When REF8M is high, MEMC may temporarily deassert /IORQ for some number of
-cycles, in order to perform VIDC DMA and refresh DRAM. We may assert /IOGT
-during this time, but the cycle will not end until MEMC reasserts /IORQ.
+During a MEMC access cycle, a DMA 'break' is signalled by MEMC deasserting /IORQ
+while REF8M is high. This will only happen in a wait state - i.e. /IOGT was not
+asserted when REF8M went high. We may still assert /IOGT at any point, but MEMC
+will ignore it until it reasserts /IORQ (which will occur while REF8M is low).
+DMA may last up to 15 REF8M periods (1875 ns).
 
-To prevent DMA from interfering with the address and data lines to our card, we
-must also control the transparent latches between the I/O bus and the main data
-bus, using /BL. On writes, we should assert /BL on the rising edge of REF8M
-following assertion of /IORQ, to latch the address and data. On reads we should
-assert /BL when the device is ready (in our case, also on the rising REF8M), and
-keep asserting it until the end of the cycle. /BL must be released within 100ns
-of cycle end.
+To prevent DMA from interfering with the data lines to our card, we must also
+control the latches between the I/O data bus and the processor, using /BL. On
+writes, we assert /BL on the rising edge of REF8M following assertion of /MS and
+/IORQ, to latch the data from the CPU until it has been read by our device. On
+reads we assert /BL when our device is ready, and keep asserting it until the
+end of the cycle. /BL must be released within 100ns of REF8M going low at the
+end of the cycle.
+
+It should also be noted that while /MS remains asserted through a DMA
+interruption, it also remains asserted between sequential accesses (e.g. LDM/STM
+instructions), and so cannot be used to identify the bounds of a MEMC cycle. It
+must only be used as a qualifier for /IORQ, and the cycle state must be
+maintained by the device being accessed.
+
+The advantage of going to all this effort is that timing is not restricted to
+IOC's four presets, and can in fact be faster (250 ns) than an IOC 'fast' cycle
+(500 ns). Additionally, IOC and MEMC accesses to the same Podule can be treated
+as independent address spaces, doubling the rather limited amount of address
+space available to a single Podule. The ENC624J600 is fast enough for 250ns
+operation (so long as we start the access asynchronously), and we use the MEMC
+address space for direct access to packet buffer RAM.
+
+Much simpler logic could be used in this case, since in a 250 ns access there is
+no opportunity for DMA to interrupt us. However the logic below aims to be
+generalisable to allow wait states, while remaining strictly correct wrt.
+Acorn's timing specs.
+
+Note that the full MEMC cycle is represented by the logical-OR of the
+`memc_cycle` and `memc_late` flipflops - `memc_cycle` goes to 1 asynchronously
+at the start of the cycle (/MS and /IORQ asserted while REF8M is high), and goes
+to 0 when the cycle-end condition is met (/IOGT and /IORQ on a rising REF8M).
+`memc_late` goes to 1 when the device is ready for an access, and only goes to 0
+at the true end of the cycle (the falling REF8M after the end condition). This
+is necessary, because on read accesses, /BL must be held until the very end of
+the cycle.
 */
+memc_early    = !memc_cycle & !memc_late & MS & IORQ & REF8M;
 
-/* MEMC cycle, starting at falling edge of REF8M */
 memc_cycle.AR = RST ;
-memc_cycle.CK = !REF8M ;
-memc_cycle.D  = MS & IORQ ;
-
-/* Latch data on rising REF8M, hold until end of cycle */
-BL            = memc_cycle & REF8M ;
-
-/* Assert IOGT immediately when we get IORQ */
-IOGT          = memc_cycle ;
-
-/* Assert write strobe for duration of write cycle */
-APPEND ETH_WR = memc_cycle & REF8M & !RW ;
+memc_cycle.AP = memc_early ; /* start cycle asynchronously */
+memc_cycle.CK = REF8M ;
+memc_cycle.D  = memc_cycle & !(IOGT & IORQ) ;
 
 /*
-Since the half-period of REF8M (62.5ns) is shorter than the ENC624J600's read
-access time (75ns), we start read accesses asynchronously as soon as /MS and
-/IORQ are asserted together rather than waiting for REF8M. This gives us enough
-time to complete the read before REF8M goes high.
+Assert /IOGT on first falling REF8M. For slower devices, `memc_late.D` could be
+derived from a handshake signal coming from the device, or by counting an
+appropriate number of REF8M cycles.
 */
-APPEND ETH_RD = MS & IORQ & RW # memc_cycle & RW ;
+memc_late.AR  = RST ;
+memc_late.CK  = !REF8M ;
+memc_late.D   = memc_cycle ;
+IOGT          = memc_late & memc_cycle ;
+
+/*
+Read: Latch data when device is ready, hold to true end of cycle
+Write: Latch data at start of cycle, hold until device has consumed data
+*/
+BL            = RW & memc_late & !memc_cycle # !RW & memc_cycle ;
+
+/*
+Add MEMC access conditions to ENC624J600 read and write strobes. Use
+`memc_late` term to extend read strobe so that /BL setup time is OK.
+*/
+APPEND ETH_WR = memc_cycle & !RW ;
+APPEND ETH_RD = (memc_cycle # memc_late) & RW ;
