@@ -44,17 +44,17 @@ swi-decoding-table: EtherENC,
                     DCIVersion, Inquire, GetNetworkMTU, SetNetworkMTU, Transmit, Filter, Stats
 
 command-keyword-table: do_command
-    ENCStats(min-args:0, max-args:1, add-syntax:,
-      help-text: "Print statistics",
-      invalid-syntax: "Syntax: *ENCStats [unit]"),
+    ENCInfo(min-args:0, max-args:1, add-syntax:,
+      help-text: "*ENCInfo displays NIC statistics and diagnostic information\n",
+      invalid-syntax: "Syntax: *ENCInfo [unit]"),
     ENCTest(min-args:0, max-args:1, add-syntax:,
-      help-text: "Run self-test",
+      help-text: "*ENCTest performs NIC self-test\n",
       invalid-syntax: "Syntax: *ENCTest [unit]"),
     ENCFlow(min-args:2, max-args:2, add-syntax:, configure:, status:,
-      help-text: "Flow control",
+      help-text: "*Configure ENCFlow enables or disables Ethernet flow control\n",
       invalid-syntax: "Syntax: *Configure ENCFlow <unit> On|Off"),
     ENCLink(min-args:2, max-args:3, add-syntax:, configure:, status:,
-      help-text: "Link mode",
+      help-text: "*Configure ENCLink sets Ethernet link speed and duplex parameters\n",
       invalid-syntax: "Syntax: *Configure ENCLink <unit> Auto | 10 Half|Full | 100 Half|Full")
 
 generic-veneers: startup_veneer/startup_handler,

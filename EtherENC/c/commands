@@ -74,7 +74,7 @@ static void print_filter(struct filter *f)
 	printf("PW=%07x Handler=%07x\n", f->pw, f->handler);
 }
 
-static void print_stats(struct enc_context *ctx)
+static void print_info(struct enc_context *ctx)
 {
 	struct enc_stats stats;
 	struct filter *f;
@@ -93,7 +93,7 @@ static void print_stats(struct enc_context *ctx)
 	printf("Hardware address: %02x:%02x:%02x:%02x:%02x:%02x\n",
 	       ctx->hwaddr[0], ctx->hwaddr[1], ctx->hwaddr[2], ctx->hwaddr[3],
 	       ctx->hwaddr[4], ctx->hwaddr[5]);
-	printf("ENC chip id &%x, revision &%02x\n", id, rev);
+	printf("Chip id &%x, revision &%02x\n", id, rev);
 	printf("Status:\n");
 	printf("\tHardware %s most recent self-test\n",
 	       (ctx->stats.base.st_link_status & ST_STATUS_OK) ? "passed" :
@@ -144,31 +144,31 @@ static void print_stats(struct enc_context *ctx)
 	printf("\nLink failures: %d\n", stats.base.st_link_failures);
 	printf("Interrupt count: %d\n", stats.irq_count);
 
-	printf("\nTotal TX frames: %d\n", stats.base.st_tx_frames);
-	printf("Total TX bytes: %d\n", stats.base.st_tx_bytes);
-	printf("Total TX errors: %d\n", stats.base.st_tx_general_errors);
-	printf("TX queue high water mark: %d\n\n", stats.tx_hwm);
+	printf("\nTX bytes: %d\n", stats.base.st_tx_bytes);
+	printf("TX frames: %d\n", stats.base.st_tx_frames);
+	printf("TX errors: %d\n", stats.base.st_tx_general_errors);
+	printf("TX queue high water mark: %d\n", stats.tx_hwm);
 
-	printf("Total RX frames: %d\n", stats.base.st_rx_frames);
-	printf("Total RX bytes: %d\n", stats.base.st_rx_bytes);
-	printf("Total RX dropped frames: %d\n", stats.base.st_dropped_frames);
-	printf("Total RX unwanted frames: %d\n", stats.base.st_unwanted_frames);
+	printf("\nRX bytes: %d\n", stats.base.st_rx_bytes);
+	printf("RX frames: %d\n", stats.base.st_rx_frames);
+	printf("RX dropped frames: %d\n", stats.base.st_dropped_frames);
+	printf("RX unwanted frames: %d\n", stats.base.st_unwanted_frames);
 	printf("RX queue high water mark: %d\n\n", stats.rx_hwm);
 
 	return;
 }
 
-_kernel_oserror *cmd_stats(const char *arg_string, int argc)
+_kernel_oserror *cmd_info(const char *arg_string, int argc)
 {
 	int unit;
 
 	if (argc == 0) {
 		for (unit = 0; unit < enc_count; unit++)
-			print_stats(enc_units[unit]);
+			print_info(enc_units[unit]);
 	} else {
 		unit = atoi(arg_string);
 		if (unit >= 0 && unit < enc_count)
-			print_stats(enc_units[unit]);
+			print_info(enc_units[unit]);
 		else
 			return enc_error(ENXIO);
 	}

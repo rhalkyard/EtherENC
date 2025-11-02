@@ -21,7 +21,7 @@
 
 #include "kernel.h"
 
-_kernel_oserror *cmd_stats(const char *arg_string, int argc);
+_kernel_oserror *cmd_info(const char *arg_string, int argc);
 _kernel_oserror *cmd_selftest(const char *arg_string, int argc);
 _kernel_oserror *cmd_flow(const char *arg_string, int argc);
 _kernel_oserror *cmd_link(const char *arg_string, int argc);

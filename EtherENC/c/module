@@ -320,8 +320,8 @@ _kernel_oserror *do_command(const char *arg_string, int argc, int cmd_no,
 			    void *pw)
 {
 	switch (cmd_no) {
-	case CMD_ENCStats:
-		return cmd_stats(arg_string, argc);
+	case CMD_ENCInfo:
+		return cmd_info(arg_string, argc);
 	case CMD_ENCTest:
 		return cmd_selftest(arg_string, argc);
 	case CMD_ENCFlow:
