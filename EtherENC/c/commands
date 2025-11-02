@@ -74,6 +74,28 @@ static void print_filter(struct filter *f)
 	printf("PW=%07x Handler=%07x\n", f->pw, f->handler);
 }
 
+static void print_diag(struct enc_context *ctx)
+{
+	switch (ctx->diag_state) {
+	case ENC_DIAG_UNKNOWN:
+		printf("unknown\n");
+		break;
+	case ENC_DIAG_OK:
+		printf("OK\n");
+		break;
+	case ENC_DIAG_MEMTEST_FAIL:
+		printf("Self-test failed %04x %04x %04x %04x\n",
+		       ctx->diag_data[0], ctx->diag_data[1], ctx->diag_data[2],
+		       ctx->diag_data[3]);
+		break;
+	case ENC_DIAG_RX_FAULT:
+		printf("Receive buffer fault %04x %04x %04x\n",
+		       ctx->diag_data[0], ctx->diag_data[1], ctx->diag_data[2]);
+		break;
+	}
+	return;
+}
+
 static void print_info(struct enc_context *ctx)
 {
 	struct enc_stats stats;
@@ -88,16 +110,15 @@ static void print_info(struct enc_context *ctx)
 	econ1 = ENC_READ_REG(ctx->regs, ECON1);
 	erxfcon = ENC_READ_REG(ctx->regs, ERXFCON);
 
-	printf("EtherENC unit %s%d in %s\n", ctx->dib.dib_name,
+	printf("Unit %s%d in %s\n", ctx->dib.dib_name,
 	       ctx->dib.dib_unit, ctx->dib.dib_location);
 	printf("Hardware address: %02x:%02x:%02x:%02x:%02x:%02x\n",
 	       ctx->hwaddr[0], ctx->hwaddr[1], ctx->hwaddr[2], ctx->hwaddr[3],
 	       ctx->hwaddr[4], ctx->hwaddr[5]);
 	printf("Chip id &%x, revision &%02x\n", id, rev);
 	printf("Status:\n");
-	printf("\tHardware %s most recent self-test\n",
-	       (ctx->stats.base.st_link_status & ST_STATUS_OK) ? "passed" :
-								 "failed");
+	printf("\tDiagnostic status: ");
+	print_diag(ctx);
 	printf("\tDriver %s\n",
 	       (ctx->flags & ENC_RUNNING) ? "running" : "inactive");
 	printf("\tLink %s", (ctx->flags & ENC_LINKUP) ? "up" : "down");

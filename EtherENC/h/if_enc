@@ -40,6 +40,11 @@
 #define ENC_FULDPX (1 << 3)		/* Link is full duplex */
 #define ENC_TXBUSY (1 << 4)		/* Transmitter is currently busy */
 
+#define ENC_DIAG_UNKNOWN 0
+#define ENC_DIAG_OK 1
+#define ENC_DIAG_MEMTEST_FAIL 2
+#define ENC_DIAG_RX_FAULT 3
+
 extern unsigned char enc_count;
 extern struct enc_context *enc_units[ENC_MAX_UNITS];
 
@@ -74,6 +79,9 @@ struct enc_context {
 
 	struct dib dib;
 	struct enc_stats stats;
+
+	unsigned int diag_state;
+	unsigned int diag_data[4];
 
 	/* Data for DIB */
 	unsigned char hwaddr[6];

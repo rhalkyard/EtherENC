@@ -314,7 +314,7 @@ static void enc_configure_phy(struct enc_context *ctx)
 
 static int enc_memtest(struct enc_context *ctx)
 {
-	unsigned int i, j;
+	unsigned int i, j, tmp;
 	int result = 0;
 	const int bufsz = 512;
 	const int bufsz_bytes = bufsz * sizeof(unsigned short);
@@ -340,6 +340,15 @@ static int enc_memtest(struct enc_context *ctx)
 		for (j = 0; j < bufsz_bytes; j += 2) {
 			if (buf[j / 2] != i + j) {
 				DBGLA(ctx->rom[0], DBG_MEMTEST_FAIL);
+				DBGLA(ctx->rom[1], 1);
+				DBGLA(ctx->rom[2], j / 2);
+				DBGLA(ctx->rom[3], buf[j / 2]);
+				DBGLA(ctx->rom[4], i + j);
+				ctx->diag_state = ENC_DIAG_MEMTEST_FAIL;
+				ctx->diag_data[0] = 1;
+				ctx->diag_data[1] = j / 2;
+				ctx->diag_data[2] = buf[j / 2];
+				ctx->diag_data[3] = i + j;
 				result = -1;
 				goto done;
 			}
@@ -356,6 +365,16 @@ static int enc_memtest(struct enc_context *ctx)
 		copy_io_in(ioptr, buf_bytes, bufsz_bytes);
 		for (j = 0; j < bufsz_bytes; j += 2) {
 			if (buf[j / 2] != (~(i + j) & 0xffff)) {
+				DBGLA(ctx->rom[0], DBG_MEMTEST_FAIL);
+				DBGLA(ctx->rom[1], 2);
+				DBGLA(ctx->rom[2], j / 2);
+				DBGLA(ctx->rom[3], buf[j / 2]);
+				DBGLA(ctx->rom[4], ~(i + j) & 0xffff);
+				ctx->diag_state = ENC_DIAG_MEMTEST_FAIL;
+				ctx->diag_data[0] = 2;
+				ctx->diag_data[1] = j / 2;
+				ctx->diag_data[2] = buf[j / 2];
+				ctx->diag_data[3] = ~(i + j) & 0xffff;
 				result = -2;
 				goto done;
 			}
@@ -371,12 +390,35 @@ static int enc_memtest(struct enc_context *ctx)
 	ENC_WRITE_REG(ctx->regs, EUDAND, ENC_MEM_LEN);
 	for (i = 0; i < ENC_MEM_LEN; i += bufsz_bytes) {
 		ENC_WRITE_REG(ctx->regs, EUDARDPT, i);
+		tmp = ENC_READ_REG(ctx->regs, EUDARDPT);
+		if (tmp != i) {
+			DBGLA(ctx->rom[0], DBG_MEMTEST_FAIL);
+			DBGLA(ctx->rom[1], 3);
+			DBGLA(ctx->rom[2], tmp);
+			DBGLA(ctx->rom[3], i);
+			ctx->diag_state = ENC_DIAG_MEMTEST_FAIL;
+			ctx->diag_data[0] = 3;
+			ctx->diag_data[1] = tmp;
+			ctx->diag_data[2] = i;
+			result = -3;
+			goto done;
+		}
 		for (j = 0; j < bufsz_bytes; j++)
 			buf_bytes[j] = ENC_READ_REG(ctx->regs, EUDADATA) & 0xff;
 
 		for (j = 0; j < bufsz_bytes; j += 2) {
 			if (buf[j / 2] != i + j) {
-				result = -3;
+				DBGLA(ctx->rom[0], DBG_MEMTEST_FAIL);
+				DBGLA(ctx->rom[1], 4);
+				DBGLA(ctx->rom[2], j / 2);
+				DBGLA(ctx->rom[3], buf[j / 2]);
+				DBGLA(ctx->rom[4], i + j);
+				ctx->diag_state = ENC_DIAG_MEMTEST_FAIL;
+				ctx->diag_data[0] = 4;
+				ctx->diag_data[1] = j / 2;
+				ctx->diag_data[2] = buf[j / 2];
+				ctx->diag_data[3] = i + j;
+				result = -4;
 				goto done;
 			}
 		}
@@ -542,6 +584,8 @@ _kernel_oserror *enc_selftest(struct enc_context *ctx)
 	} else {
 		ENC_SET_BITS(ctx->regs, ECON1, rxen);
 		ctx->stats.base.st_link_status |= ST_STATUS_OK;
+		if (ctx->diag_state == ENC_DIAG_UNKNOWN)
+			ctx->diag_state = ENC_DIAG_OK;
 
 		/* Kick the transmitter now that we're back in action */
 		if (ctx->flags & ENC_RUNNING)
@@ -792,7 +836,7 @@ _kernel_oserror *enc_stats(int flags, struct enc_context *ctx, void *buffer)
 }
 
 /* Handle a received packet */
-static void enc_rpkt(struct enc_context *ctx)
+static int enc_rpkt(struct enc_context *ctx)
 {
 	struct enc_pkthdr hdr;
 	struct filter *f;
@@ -800,14 +844,30 @@ static void enc_rpkt(struct enc_context *ctx)
 	unsigned short pktlen, rxptr, rxtail, orig_rxptr;
 	unsigned int thislen;
 	unsigned char *data;
+	int err = 0;
 	RxHdr *rxh;
 
 	DBGLA(ctx->rom[0], DBG_RXSTART);
 
 	/* Read ENC624J600 header (including ethernet header) */
 	rxptr = enc_rx_read(ctx, ctx->rxptr, (unsigned char *)&hdr, ENC_HDRLEN);
-	pktlen = hdr.length - ETH_HDRLEN;
+	pktlen = hdr.length - ETH_HDRLEN - 4;
 	hdr.ether_header.ether_type = ntohs(hdr.ether_header.ether_type);
+
+	/* Sanity-check packet length and next-packet pointer. */
+	if (pktlen > ETHERMTU || pktlen < ETHERMIN ||
+	    hdr.next >= RXBUF_END || hdr.next < RXBUF_BASE) {
+		err = -1;
+		DBGLA(ctx->rom[0], DBG_RXERR);
+		DBGLA(ctx->rom[1], ctx->rxptr);
+		DBGLA(ctx->rom[2], hdr.next);
+		DBGLA(ctx->rom[3], pktlen);
+		ctx->diag_state = ENC_DIAG_RX_FAULT;
+		ctx->diag_data[0] = ctx->rxptr;
+		ctx->diag_data[1] = hdr.next;
+		ctx->diag_data[2] = pktlen;
+		goto errexit;
+	}
 
 #ifdef RXDEBUG
 	DBGLOG(("EtherENC", 1, "rx packet @%x length=%x next=%x rsv=%x type=%x",
@@ -889,12 +949,14 @@ done:
 		rxtail += RXBUF_LEN;
 	ENC_WRITE_REG(ctx->regs, ERXTAIL, rxtail);
 
+errexit:
 	/* Always leave the paging register at 0 in case this recieve
 	 * interrupted a transmit while it was copying a packet into the TX
 	 * buffer.
 	 */
 	enc_setpage(ctx, 0);
 	DBGLA(ctx->rom[0], DBG_RXDONE);
+	return err;
 }
 
 /* Ethernet interrupts are frequent and potentially time-consuming, but not
@@ -949,8 +1011,16 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 		if (pktcnt > ctx->stats.rx_hwm)
 			ctx->stats.rx_hwm = pktcnt;
 		for (i = 0; i < pktcnt; i++) {
-			enc_rpkt(ctx);
-			ENC_SET_BITS(ctx->regs, ECON1, ECON1_PKTDEC);
+			if (enc_rpkt(ctx) == 0) {
+				ENC_SET_BITS(ctx->regs, ECON1, ECON1_PKTDEC);
+			} else {
+				ctx->stats.base.st_link_status &= ~ST_STATUS_OK;
+				enc_shutdown(ctx);
+				irq_restore(s);
+				DBGLA(ctx->rom[0], DBG_IRQLEAVE_ERR);
+				DBGIRQ(0);
+				return;
+			}
 		}
 	}
 #ifdef IRQDEBUG
