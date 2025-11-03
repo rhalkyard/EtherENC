@@ -110,8 +110,8 @@ static void print_info(struct enc_context *ctx)
 	econ1 = ENC_READ_REG(ctx->regs, ECON1);
 	erxfcon = ENC_READ_REG(ctx->regs, ERXFCON);
 
-	printf("Unit %s%d in %s\n", ctx->dib.dib_name,
-	       ctx->dib.dib_unit, ctx->dib.dib_location);
+	printf("Unit %s%d in %s\n", ctx->dib.dib_name, ctx->dib.dib_unit,
+	       ctx->dib.dib_location);
 	printf("Hardware address: %02x:%02x:%02x:%02x:%02x:%02x\n",
 	       ctx->hwaddr[0], ctx->hwaddr[1], ctx->hwaddr[2], ctx->hwaddr[3],
 	       ctx->hwaddr[4], ctx->hwaddr[5]);
@@ -130,8 +130,10 @@ static void print_info(struct enc_context *ctx)
 							    "(Auto)");
 		if (!(ctx->flags & ENC_100MB))
 			printf(", %s polarity",
-			       ctx->stats.base.st_link_polarity ? "correct" :
-								  "inverted");
+			       ctx->stats.base.st_link_polarity &
+					       ST_LINK_POLARITY_CORRECT ?
+				       "correct" :
+				       "inverted");
 	} else {
 		printf("\n");
 	}

@@ -59,6 +59,18 @@ headers and loadable driver module.
 `WriteROM` can then be used to program or update the card's flash with the new
 ROM image.
 
+### Checkout
+
+Note that this repository includes the [RISC OS Open TCPIPLibs
+source](https://gitlab.riscosopen.org/RiscOS/Sources/Lib/TCPIPLibs) as a
+submodule. Specifically, it uses the
+[TCPIPLibs-5_01](https://gitlab.riscosopen.org/RiscOS/Sources/Lib/TCPIPLibs/-/tree/TCPIPLibs-5_01)
+tag, as this corresponds to the DCI 4.04 specification, without bringing in a
+bunch of changes that make old versions of Acorn C/C++ get confused.
+
+After cloning this repo, run `git submodule update --init` to set up submodules
+correctly.
+
 ### Building
 
 1. Install Acorn C/C++ and run `!SetPaths` inside the Acorn C/C++ directory.
@@ -141,9 +153,6 @@ Public License Version 3, with the following exceptions:
 
 - `EtherENC.h.syslog` and `EtherENC.s.syslog` are included unmodified from the
   SysLog freeware application (https://compton.nu/software/riscos/syslog).
-
-- The contents of `EtherENC.TCPIPLibs` is from the `sockets.arc` archive, as
-  distributed on Acorn's FTP site. Ownership and licensing of this is unclear.
 
 ## To Do
 

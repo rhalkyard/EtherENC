@@ -253,7 +253,9 @@ static void enc_link_update(struct enc_context *ctx)
 	}
 	irq_restore(s);
 
-	ctx->stats.base.st_link_polarity = polarity ? 1 : 0;
+	ctx->stats.base.st_link_polarity = polarity ?
+						   ST_LINK_POLARITY_CORRECT :
+						   ST_LINK_POLARITY_INCORRECT;
 
 	/* Wait for flow control state machine to be idle before changing duplex
 	 * mode or flow control settings */
@@ -769,7 +771,7 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 		else
 			memcpy(hdr->ether_shost, ctx->hwaddr,
 			       sizeof(struct ether_addr));
-		hdr->ether_type = htons(frame_type);
+		hdr->ether_type = _HTONS(frame_type);
 
 		/* Make sure that the payload chain is safe to queue (i.e. owned
 		 * by us and consisting of safe data).
@@ -852,11 +854,11 @@ static int enc_rpkt(struct enc_context *ctx)
 	/* Read ENC624J600 header (including ethernet header) */
 	rxptr = enc_rx_read(ctx, ctx->rxptr, (unsigned char *)&hdr, ENC_HDRLEN);
 	pktlen = hdr.length - ETH_HDRLEN - 4;
-	hdr.ether_header.ether_type = ntohs(hdr.ether_header.ether_type);
+	hdr.ether_header.ether_type = _NTOHS(hdr.ether_header.ether_type);
 
 	/* Sanity-check packet length and next-packet pointer. */
-	if (pktlen > ETHERMTU || pktlen < ETHERMIN ||
-	    hdr.next >= RXBUF_END || hdr.next < RXBUF_BASE) {
+	if (pktlen > ETHERMTU || pktlen < ETHERMIN || hdr.next >= RXBUF_END ||
+	    hdr.next < RXBUF_BASE) {
 		err = -1;
 		DBGLA(ctx->rom[0], DBG_RXERR);
 		DBGLA(ctx->rom[1], ctx->rxptr);

@@ -17,11 +17,12 @@
  */
 
 #include "mbuf.h"
-#include "netinet/if_ether.h"
 #include "syslog.h"
 
 #include "kernel.h"
 #include "swis.h"
+
+#include "if_enc.h"
 
 struct mbctl MBCTL;
 int mbufsession = 0;

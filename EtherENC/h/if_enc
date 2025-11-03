@@ -23,6 +23,10 @@
 #include "mbuf.h"
 
 #include "kernel.h"
+#include "sys/types.h"
+#include "net/if.h"
+#include "netinet/in.h"
+#include "net/if_arp.h"
 #include "netinet/if_ether.h"
 #include "sys/dcistructs.h"
 

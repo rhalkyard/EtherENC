@@ -40,8 +40,9 @@
 #define ENC_LDR_POWERON 1
 #define ENC_LDR_IRQON 2
 
-#define htons(val) (((val & 0xff00) >> 8) | ((val & 0x00ff) << 8))
-#define ntohs(val) htons(val)
+/* Define our own ntohs/htons to avoid having to link with TCPIPlib */
+#define _HTONS(val) (((val & 0xff00) >> 8) | ((val & 0x00ff) << 8))
+#define _NTOHS(val) _HTONS(val)
 
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 

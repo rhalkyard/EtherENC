@@ -1,0 +1,3 @@
+[submodule "EtherENC/TCPIPLibs"]
+	path = EtherENC/TCPIPLibs
+	url = https://gitlab.riscosopen.org/RiscOS/Sources/Lib/TCPIPLibs

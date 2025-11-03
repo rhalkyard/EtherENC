@@ -31,6 +31,8 @@
 #define MBCTL_NAME MBCTL
 #include "sys/mbuf.h"
 
+#define m_nextpkt m_list
+
 extern struct mbctl MBCTL;
 extern int mbufsession;
 

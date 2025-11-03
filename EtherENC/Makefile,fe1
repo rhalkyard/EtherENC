@@ -10,10 +10,10 @@
 Defines = $(DbgDefines)
 
 # Toolflags:
-CCflags = -c -depend !Depend -IC:,@.TCPIPLibs.include -throwback -zM -w -strict -fach -Otime $(Defines)
+CCflags = -c -depend !Depend -IC:,@.TCPIPLibs.headers -throwback -zM -w -strict -fach -Otime $(Defines)
 Linkflags = -m -o $@ 
 ObjAsmflags = -depend !Depend -Stamp -quit -CloseExec -throwback
-CMHGflags = -depend !Depend -IC:,@.TCPIPLibs.include -p $(Defines)
+CMHGflags = -depend !Depend -IC:,@.TCPIPLibs.headers -p $(Defines)
 LibFileflags = -c -o $@
 Squeezeflags = -o $@
 
