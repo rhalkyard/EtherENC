@@ -21,11 +21,11 @@
 
 #include "kernel.h"
 
-/* TODO: Get a real error-number allocation */
-#define ENC_ERRBASE 0x7FFF00
+#define ENC_ERRBASE 0x822800
 
 enum enc_err {
-	ENC_ERR_NO_PODULES = ENC_ERRBASE,
+	ENC_ERR_LOADER_SWI = ENC_ERRBASE,
+	ENC_ERR_NO_PODULES,
 	ENC_ERR_NO_DEVICE,
 	ENC_ERR_SINGLE_INSTANCE,
 	ENC_ERR_FAULTY,

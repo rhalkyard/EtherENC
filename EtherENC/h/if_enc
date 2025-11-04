@@ -30,8 +30,9 @@
 #include "netinet/if_ether.h"
 #include "sys/dcistructs.h"
 
-#define ENC_MFR 0x9635
-#define ENC_TYPE 0x3216
+#define ENC_MFR 0x72
+#define ENC_TYPE 0x14E
+#define ENC8_TYPE 0x14F
 
 #define ENC_IFNAME "enc"
 

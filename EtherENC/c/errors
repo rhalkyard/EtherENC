@@ -23,7 +23,8 @@
 
 static _kernel_oserror errblk;
 
-static char *errtxt[] = { "No podule slots on this system",
+static char *errtxt[] = { "Invalid reason code for loader SWI",
+			  "No podule slots on this system",
 			  "No EtherENC devices found",
 			  "Only a single instance of this module may be loaded",
 			  "Device failed self-test" };

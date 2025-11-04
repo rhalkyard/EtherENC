@@ -17,9 +17,8 @@ rom_pagebits% = 6
 eth_pagebits% = 2
 
 REM Podule manufacturer and product IDs
-REM These are supposed to be assigned to you by Acorn (lol)
-mfr_id% = &9635
-prod_id% = &3216
+mfr_id% = &72
+prod_id% = &14E
 
 REM These are derived quantities and should not need to be edited
 REM unless you are doing something weird.
@@ -295,14 +294,14 @@ REM Do a dummy read to MEMC space to enable IRQs
   BICS    PC, R14, #v_bit%
 
 .loader_err_atb
-  EQUD    &500
+  EQUD    &584
   EQUS    "Address too big" + CHR$0
 .loader_err_nw
-  EQUD    &501
+  EQUD    &580
   EQUS    "Can't write" + CHR$0
   ALIGN
 .loader_err_swi
-  EQUD    &502
+  EQUD    &822800
   EQUS    "Invalid reason code" + CHR$0
   ALIGN
 ]

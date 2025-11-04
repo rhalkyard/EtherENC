@@ -125,12 +125,12 @@ The system's CMOS memory is used to store hardware configuration options across
 reboots. These options can be set and read using RISC OS' `*Configure` and
 `*Status` commands.
 
-`*Configure ENCFlow <unit> Off|On` - Enable or disable PAUSE-frame flow control,
-which may help mitigate packet drops on heavily-loaded systems. Default is
-`Off`. Flow control can only operate on full-duplex links.
+`*Configure EENCFlow <unit> Off|On` - Enable or disable PAUSE-frame flow
+control, which may help mitigate packet drops on heavily-loaded systems. Default
+is `Off`. Flow control can only operate on full-duplex links.
 
-`*Configure ENCLink <unit> Auto | 10 Half|Full | 100 Half|Full` - Configure link
-mode. `Auto` (the default) causes link speed and duplex mode to be
+`*Configure EENCLink <unit> Auto | 10 Half|Full | 100 Half|Full` - Configure
+link mode. `Auto` (the default) causes link speed and duplex mode to be
 autonegotiated with the link partner. Otherwise, a fixed speed and duplex
 setting (one of `10 Half`, `10 Full`, `100 Half` or `100 Full`) can be set.
 
@@ -139,8 +139,8 @@ to reconfigure the card in order to overwrite any leftover CMOS settings from
 previous residents of that slot. Defaults can be restored with:
 
 ```
-*Configure ENCLink <unit> Auto
-*Configure ENCFlow <unit> Off
+*Configure EENCLink <unit> Auto
+*Configure EENCFlow <unit> Off
 ```
 
 ## Licenses
@@ -160,6 +160,21 @@ Public License Version 3, with the following exceptions:
 
 - Performance testing and driver optimisation
 
+## Allocations
+
+Names and IDs registered with ROOL (see
+[https://www.riscosopen.org/content/allocate](https://www.riscosopen.org/content/allocate)
+for info). If you fork EtherENC and make software-incompatible changes, please 
+
+| Allocation Type        | Allocation                                     | Source locations                                           |
+| ---------------------- | ---------------------------------------------- | ---------------------------------------------------------- |
+| Ethernet Driver Suffix | `ENC`                                          | Everywhere                                                 |
+| SWI Base               | &5A9C0                                         | [`cmhg.ModuleHdr`](cmhg/ModuleHdr)                         |
+| Module Name            | `EtherENC`                                     | [`cmhg.ModuleHdr`](cmhg/ModuleHdr)                         |
+| Commands               | `EENCInfo`, `EENCTest`, `EENCFlow`, `EENCLink` | [`cmhg.ModuleHdr`](cmhg/ModuleHdr), [`c.module`](c/module) |
+| Error Block            | &822800                                        | [`h.errors`](h/errors), [`MkROM`](MkROM.bas)               |
+| Podule Manufacturer ID | &72                                            | [`h.if_enc`](h/if_enc), [`MkROM`](MkROM.bas)               |
+| Podule Type ID         | &14E (16 bit), &14F (8 bit)                    | [`h.if_enc`](h/if_enc), [`MkROM`](MkROM.bas)               |
 
 ## References
 

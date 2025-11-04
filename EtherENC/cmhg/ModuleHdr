@@ -33,8 +33,7 @@ initialisation-code: module_init
 
 finalisation-code: module_fini
 
-; TODO: use a real SWI base
-swi-chunk-base-number: 0xC0000
+swi-chunk-base-number: 0x5a9c0
 
 swi-handler-code: do_swi
 
@@ -44,16 +43,16 @@ swi-decoding-table: EtherENC,
                     DCIVersion, Inquire, GetNetworkMTU, SetNetworkMTU, Transmit, Filter, Stats
 
 command-keyword-table: do_command
-    ENCInfo(min-args:0, max-args:1, add-syntax:,
+    EENCInfo(min-args:0, max-args:1, add-syntax:,
       help-text: "*ENCInfo displays NIC statistics and diagnostic information\n",
       invalid-syntax: "Syntax: *ENCInfo [unit]"),
-    ENCTest(min-args:0, max-args:1, add-syntax:,
+    EENCTest(min-args:0, max-args:1, add-syntax:,
       help-text: "*ENCTest performs NIC self-test\n",
       invalid-syntax: "Syntax: *ENCTest [unit]"),
-    ENCFlow(min-args:2, max-args:2, add-syntax:, configure:, status:,
+    EENCFlow(min-args:2, max-args:2, add-syntax:, configure:, status:,
       help-text: "*Configure ENCFlow enables or disables Ethernet flow control\n",
       invalid-syntax: "Syntax: *Configure ENCFlow <unit> On|Off"),
-    ENCLink(min-args:2, max-args:3, add-syntax:, configure:, status:,
+    EENCLink(min-args:2, max-args:3, add-syntax:, configure:, status:,
       help-text: "*Configure ENCLink sets Ethernet link speed and duplex parameters\n",
       invalid-syntax: "Syntax: *Configure ENCLink <unit> Auto | 10 Half|Full | 100 Half|Full")
 
