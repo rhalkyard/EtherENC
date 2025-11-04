@@ -13,7 +13,6 @@ Defines = $(DbgDefines)
 CCflags = -c -depend !Depend -IC:,@.TCPIPLibs.headers -throwback -zM -w -strict -fach -Otime $(Defines)
 Linkflags = -m -o $@ 
 ObjAsmflags = -depend !Depend -Stamp -quit -CloseExec -throwback
-CMHGflags = -depend !Depend -IC:,@.TCPIPLibs.headers -p $(Defines)
 LibFileflags = -c -o $@
 Squeezeflags = -o $@
 
@@ -48,7 +47,6 @@ clean:
 
 # User-editable dependencies:
 
-h.ModuleHdr: o.ModuleHdr
 o.if_enc: h.ModuleHdr
 o.commands: h.ModuleHdr
 
@@ -60,8 +58,5 @@ o.commands: h.ModuleHdr
 .s.o:
 	ObjAsm $(ObjAsmflags) -o $@ @.s.$*
 
-.cmhg.o:
-	cmhg $(CMHGflags) -o $@ @.cmhg.$*
-
-.cmhg.h:
-	cmhg $(CMHGflags) -d $@ @.cmhg.$*
+.cmhg.h .cmhg.o:
+	cmhg @.cmhg.$* @.o.$* @.h.$*

@@ -15,17 +15,7 @@
 ; You should have received a copy of the GNU General Public License along with
 ; this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include "sys/dcistructs.h"
-#include "sys/mbuf.h"
-#include "debug.h"
-
-#ifdef DEBUG
-#define COMMENT() Debug Build
-#else
-#define COMMENT()
-#endif
-
-help-string:  EtherENC 0.01 COMMENT()
+help-string:  EtherENC 0.01
 
 title-string: EtherENC
 
@@ -37,7 +27,10 @@ swi-chunk-base-number: 0x5a9c0
 
 swi-handler-code: do_swi
 
-service-call-handler: do_service Service_EnumerateNetworkDrivers Service_DCIProtocolStatus Service_MbufManagerStatus
+; 0x9b Service_EnumerateNetworkDrivers
+; 0x9f Service_DCIProtocolStatus
+; 0xa2 Service_MbufManagerStatus
+service-call-handler: do_service 0x9b 0x9f 0xa2
 
 swi-decoding-table: EtherENC,
                     DCIVersion, Inquire, GetNetworkMTU, SetNetworkMTU, Transmit, Filter, Stats
