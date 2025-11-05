@@ -167,15 +167,16 @@ static void enc_write_phy_reg(struct enc_context *ctx,
 			      const unsigned int phyreg,
 			      const unsigned int value)
 {
+	register volatile unsigned int *regs = ctx->regs;
 	/* Wait for internal MII to become available */
-	while (ENC_READ_REG(ctx->regs, MISTAT) & MISTAT_BUSY) {
+	while (ENC_READ_REG(regs, MISTAT) & MISTAT_BUSY) {
 	}
 	/* MIREGADR must be written with bits 12..8 = 00001 */
-	ENC_WRITE_REG(ctx->regs, MIREGADR, 0x0100 | phyreg);
-	ENC_WRITE_REG(ctx->regs, MIWR, value);
+	ENC_WRITE_REG(regs, MIREGADR, 0x0100 | phyreg);
+	ENC_WRITE_REG(regs, MIWR, value);
 	delay_us(26, ctx->rom); /* Operation should take 25.6us */
 	/* Wait for write to complete */
-	while (ENC_READ_REG(ctx->regs, MISTAT) & MISTAT_BUSY) {
+	while (ENC_READ_REG(regs, MISTAT) & MISTAT_BUSY) {
 	}
 }
 
@@ -183,18 +184,19 @@ static void enc_write_phy_reg(struct enc_context *ctx,
 static unsigned int enc_read_phy_reg(struct enc_context *ctx,
 				     const unsigned int phyreg)
 {
+	register volatile unsigned int *regs = ctx->regs;
 	/* Wait for internal MII to become available */
-	while (ENC_READ_REG(ctx->regs, MISTAT) & MISTAT_BUSY) {
+	while (ENC_READ_REG(regs, MISTAT) & MISTAT_BUSY) {
 	}
 	/* MIREGADR must be written with bits 12..8 = 00001 */
-	ENC_WRITE_REG(ctx->regs, MIREGADR, 0x0100 | phyreg);
-	ENC_SET_BITS(ctx->regs, MICMD, MICMD_MIIRD);
+	ENC_WRITE_REG(regs, MIREGADR, 0x0100 | phyreg);
+	ENC_SET_BITS(regs, MICMD, MICMD_MIIRD);
 	delay_us(26, ctx->rom); /* Operation should take 25.6us */
 	/* Wait on busy bit just in case */
-	while (ENC_READ_REG(ctx->regs, MISTAT) & MISTAT_BUSY) {
+	while (ENC_READ_REG(regs, MISTAT) & MISTAT_BUSY) {
 	}
-	ENC_WRITE_REG(ctx->regs, MICMD, 0);
-	return ENC_READ_REG(ctx->regs, MIRD);
+	ENC_WRITE_REG(regs, MICMD, 0);
+	return ENC_READ_REG(regs, MIRD);
 }
 
 /* Synchronise driver flags and MAC link parameters to match the PHY, call on
@@ -202,55 +204,58 @@ static unsigned int enc_read_phy_reg(struct enc_context *ctx,
  */
 static void enc_link_update(struct enc_context *ctx)
 {
-	unsigned int estat = ENC_READ_REG(ctx->regs, ESTAT);
+	register volatile unsigned int *regs = ctx->regs;
+	unsigned int estat = ENC_READ_REG(regs, ESTAT);
 	unsigned int spddpx =
 		(enc_read_phy_reg(ctx, PHSTAT3) & PHSTAT3_SPDDPX_MASK) >>
 		PHSTAT3_SPDDPX_SHIFT;
 	unsigned int polarity =
 		!!(enc_read_phy_reg(ctx, PHSTAT2) & PHSTAT2_PLRITY);
-	unsigned int s;
+	unsigned int s, flags;
 	char *linkstate;
 	char *linkspeed;
 	char *linkdpx;
 
 	s = irqs_off();
+	flags = ctx->flags;
 	if (estat & ESTAT_PHYLNK) {
 		linkstate = "up";
-		ctx->flags |= ENC_LINKUP;
+		flags |= ENC_LINKUP;
 	} else {
-		if (ctx->flags & ENC_LINKUP)
+		if (flags & ENC_LINKUP)
 			ctx->stats.base.st_link_failures += 1;
 		linkstate = "down";
-		ctx->flags &= ~ENC_LINKUP;
+		flags &= ~ENC_LINKUP;
 	}
 
 	switch (spddpx) {
 	case 0x6:
 		linkspeed = "100";
 		linkdpx = "full";
-		ctx->flags |= ENC_100MB;
-		ctx->flags |= ENC_FULDPX;
+		flags |= ENC_100MB;
+		flags |= ENC_FULDPX;
 		break;
 	case 0x5:
 		linkspeed = "10";
 		linkdpx = "full";
-		ctx->flags &= ~ENC_100MB;
-		ctx->flags |= ENC_FULDPX;
+		flags &= ~ENC_100MB;
+		flags |= ENC_FULDPX;
 		break;
 	case 0x2:
 		linkspeed = "100";
 		linkdpx = "half";
-		ctx->flags |= ENC_100MB;
-		ctx->flags &= ~ENC_FULDPX;
+		flags |= ENC_100MB;
+		flags &= ~ENC_FULDPX;
 		break;
 	case 0x1:
 	default:
 		linkspeed = "10";
 		linkdpx = "half";
-		ctx->flags &= ~ENC_100MB;
-		ctx->flags &= ~ENC_FULDPX;
+		flags &= ~ENC_100MB;
+		flags &= ~ENC_FULDPX;
 		break;
 	}
+	ctx->flags = flags;
 	irq_restore(s);
 
 	ctx->stats.base.st_link_polarity = polarity ?
@@ -259,28 +264,27 @@ static void enc_link_update(struct enc_context *ctx)
 
 	/* Wait for flow control state machine to be idle before changing duplex
 	 * mode or flow control settings */
-	while (!(ENC_READ_REG(ctx->regs, ESTAT) & ESTAT_FCIDLE)) {
+	while (!(ENC_READ_REG(regs, ESTAT) & ESTAT_FCIDLE)) {
 	};
 
 	if (estat & ESTAT_PHYDPX) {
 		/* Full duplex */
-		ENC_SET_BITS(ctx->regs, MACON2, MACON2_FULDPX);
-		ENC_WRITE_REG(ctx->regs, MABBIPG, 0x15 << MABBIPG_BBIPG_SHIFT);
+		ENC_SET_BITS(regs, MACON2, MACON2_FULDPX);
+		ENC_WRITE_REG(regs, MABBIPG, 0x15 << MABBIPG_BBIPG_SHIFT);
 		if (ctx->config & CONFIG_FLOW_ON) {
-			ENC_SET_BITS(ctx->regs, ECON2, ECON2_AUTOFC);
+			ENC_SET_BITS(regs, ECON2, ECON2_AUTOFC);
 		} else {
-			ENC_CLEAR_BITS(ctx->regs, ECON2, ECON2_AUTOFC);
-			ENC_CLEAR_BITS(ctx->regs, ECON1,
-				       ECON1_FCOP0 | ECON1_FCOP1);
+			ENC_CLEAR_BITS(regs, ECON2, ECON2_AUTOFC);
+			ENC_CLEAR_BITS(regs, ECON1, ECON1_FCOP0 | ECON1_FCOP1);
 		}
 	} else {
 		/* Half duplex */
-		ENC_CLEAR_BITS(ctx->regs, MACON2, MACON2_FULDPX);
-		ENC_WRITE_REG(ctx->regs, MABBIPG, 0x12 << MABBIPG_BBIPG_SHIFT);
+		ENC_CLEAR_BITS(regs, MACON2, MACON2_FULDPX);
+		ENC_WRITE_REG(regs, MABBIPG, 0x12 << MABBIPG_BBIPG_SHIFT);
 		/* Disable automatic flow control */
-		ENC_CLEAR_BITS(ctx->regs, ECON2, ECON2_AUTOFC);
+		ENC_CLEAR_BITS(regs, ECON2, ECON2_AUTOFC);
 		/* Ensure flow control is deasserted */
-		ENC_CLEAR_BITS(ctx->regs, ECON1, ECON1_FCOP0 | ECON1_FCOP1);
+		ENC_CLEAR_BITS(regs, ECON1, ECON1_FCOP0 | ECON1_FCOP1);
 	}
 
 	DBGLOG(("EtherENC", 1, "Link %s, %smbit %s duplex", linkstate,
@@ -316,6 +320,7 @@ static void enc_configure_phy(struct enc_context *ctx)
 
 static int enc_memtest(struct enc_context *ctx)
 {
+	register volatile unsigned int *regs = ctx->regs;
 	unsigned int i, j, tmp;
 	int result = 0;
 	const int bufsz = 512;
@@ -388,11 +393,11 @@ static int enc_memtest(struct enc_context *ctx)
 
 	DBGLA(ctx->rom[0], DBG_MEMTEST_START);
 	/* Read back again, this time through the registers. */
-	ENC_WRITE_REG(ctx->regs, EUDAST, 0);
-	ENC_WRITE_REG(ctx->regs, EUDAND, ENC_MEM_LEN);
+	ENC_WRITE_REG(regs, EUDAST, 0);
+	ENC_WRITE_REG(regs, EUDAND, ENC_MEM_LEN);
 	for (i = 0; i < ENC_MEM_LEN; i += bufsz_bytes) {
-		ENC_WRITE_REG(ctx->regs, EUDARDPT, i);
-		tmp = ENC_READ_REG(ctx->regs, EUDARDPT);
+		ENC_WRITE_REG(regs, EUDARDPT, i);
+		tmp = ENC_READ_REG(regs, EUDARDPT);
 		if (tmp != i) {
 			DBGLA(ctx->rom[0], DBG_MEMTEST_FAIL);
 			DBGLA(ctx->rom[1], 3);
@@ -406,7 +411,7 @@ static int enc_memtest(struct enc_context *ctx)
 			goto done;
 		}
 		for (j = 0; j < bufsz_bytes; j++)
-			buf_bytes[j] = ENC_READ_REG(ctx->regs, EUDADATA) & 0xff;
+			buf_bytes[j] = ENC_READ_REG(regs, EUDADATA) & 0xff;
 
 		for (j = 0; j < bufsz_bytes; j += 2) {
 			if (buf[j / 2] != i + j) {
@@ -440,6 +445,7 @@ done:
  */
 int enc_poweron(struct enc_context *ctx)
 {
+	register volatile unsigned int *regs = ctx->regs;
 	int val, count;
 	/* Count polling-loop iterations as a crude way of tracking timeouts -
 	 * each fast-cycle access is 0.5us so 500 iterations is ~250us.
@@ -457,8 +463,8 @@ int enc_poweron(struct enc_context *ctx)
 	/* Write and readback EUDAST until it responds correctly */
 	count = 0;
 	do {
-		ENC_WRITE_REG(ctx->regs, EUDAST, 0x1234);
-		val = ENC_READ_REG(ctx->regs, EUDAST);
+		ENC_WRITE_REG(regs, EUDAST, 0x1234);
+		val = ENC_READ_REG(regs, EUDAST);
 	} while (count++ < timeout && val != 0x1234);
 	if (val != 0x1234)
 		return -1;
@@ -466,7 +472,7 @@ int enc_poweron(struct enc_context *ctx)
 	/* Poll for clock-ready */
 	count = 0;
 	do {
-		val = ENC_READ_REG(ctx->regs, ESTAT);
+		val = ENC_READ_REG(regs, ESTAT);
 	} while (count++ < timeout && !(val & ESTAT_CLKRDY));
 
 	if (!(val & ESTAT_CLKRDY))
@@ -476,7 +482,7 @@ int enc_poweron(struct enc_context *ctx)
 	enc_reset(ctx);
 
 	/* EUDAST should have reset to 0 */
-	if (ENC_READ_REG(ctx->regs, EUDAST) != 0)
+	if (ENC_READ_REG(regs, EUDAST) != 0)
 		return -1;
 
 	/* Un-gate IRQ */
@@ -510,6 +516,7 @@ void enc_reset(struct enc_context *ctx)
 /* Send a packet off the TX queue */
 static void enc_start_tx(struct enc_context *ctx)
 {
+	register volatile unsigned int *regs = ctx->regs;
 	struct mbuf *top, *m;
 	unsigned int len, econ1, state;
 	int s;
@@ -538,9 +545,9 @@ static void enc_start_tx(struct enc_context *ctx)
 		m = m->m_next;
 	}
 
-	ENC_WRITE_REG(ctx->regs, ETXST, TXBUF_BASE);
-	ENC_WRITE_REG(ctx->regs, ETXLEN, len);
-	ENC_SET_BITS(ctx->regs, ECON1, ECON1_TXRTS);
+	ENC_WRITE_REG(regs, ETXST, TXBUF_BASE);
+	ENC_WRITE_REG(regs, ETXLEN, len);
+	ENC_SET_BITS(regs, ECON1, ECON1_TXRTS);
 
 	ctx->stats.base.st_tx_frames += 1;
 	ctx->stats.base.st_tx_bytes += len;
@@ -550,24 +557,25 @@ static void enc_start_tx(struct enc_context *ctx)
 
 _kernel_oserror *enc_selftest(struct enc_context *ctx)
 {
+	register volatile unsigned int *regs = ctx->regs;
 	_kernel_oserror *err = NULL;
 	unsigned int rxen, eie;
 	int s;
 
 	/* Disable reception */
-	rxen = ENC_READ_REG(ctx->regs, ECON1) & ECON1_RXEN;
-	ENC_CLEAR_BITS(ctx->regs, ECON1, ECON1_RXEN);
+	rxen = ENC_READ_REG(regs, ECON1) & ECON1_RXEN;
+	ENC_CLEAR_BITS(regs, ECON1, ECON1_RXEN);
 
-	eie = ENC_READ_REG(ctx->regs, EIE);
+	eie = ENC_READ_REG(regs, EIE);
 	if ((ctx->flags & ENC_RUNNING) && (eie & EIE_INTIE) &&
 	    (eie & EIE_PKTIE))
-		while (ENC_READ_REG(ctx->regs, ESTAT) & ESTAT_PKTCNT_MASK) {
+		while (ENC_READ_REG(regs, ESTAT) & ESTAT_PKTCNT_MASK) {
 		}
 
 	s = irqs_off();
 
 	/* Wait for transmitter to be idle */
-	while (ENC_READ_REG(ctx->regs, ECON1) & ECON1_TXRTS) {
+	while (ENC_READ_REG(regs, ECON1) & ECON1_TXRTS) {
 	}
 
 	/* Run the tests (just the one for now) */
@@ -575,8 +583,8 @@ _kernel_oserror *enc_selftest(struct enc_context *ctx)
 		err = enc_error(ENC_ERR_FAULTY);
 
 	/* Disable user-data pointers */
-	ENC_WRITE_REG(ctx->regs, EUDAST, 0xffff);
-	ENC_WRITE_REG(ctx->regs, EUDAND, 0xffff);
+	ENC_WRITE_REG(regs, EUDAST, 0xffff);
+	ENC_WRITE_REG(regs, EUDAND, 0xffff);
 
 	irq_restore(s);
 
@@ -584,7 +592,7 @@ _kernel_oserror *enc_selftest(struct enc_context *ctx)
 		enc_shutdown(ctx);
 		ctx->stats.base.st_link_status &= ~ST_STATUS_OK;
 	} else {
-		ENC_SET_BITS(ctx->regs, ECON1, rxen);
+		ENC_SET_BITS(regs, ECON1, rxen);
 		ctx->stats.base.st_link_status |= ST_STATUS_OK;
 		if (ctx->diag_state == ENC_DIAG_UNKNOWN)
 			ctx->diag_state = ENC_DIAG_OK;
@@ -599,14 +607,15 @@ _kernel_oserror *enc_selftest(struct enc_context *ctx)
 
 void enc_get_hwaddr(struct enc_context *ctx, unsigned char *addr)
 {
+	register volatile unsigned int *regs = ctx->regs;
 	unsigned int tmp;
-	tmp = ENC_READ_REG(ctx->regs, MAADR1);
+	tmp = ENC_READ_REG(regs, MAADR1);
 	addr[0] = tmp & 0xff;
 	addr[1] = tmp >> 8;
-	tmp = ENC_READ_REG(ctx->regs, MAADR2);
+	tmp = ENC_READ_REG(regs, MAADR2);
 	addr[2] = tmp & 0xff;
 	addr[3] = tmp >> 8;
-	tmp = ENC_READ_REG(ctx->regs, MAADR3);
+	tmp = ENC_READ_REG(regs, MAADR3);
 	addr[4] = tmp & 0xff;
 	addr[5] = tmp >> 8;
 }
@@ -671,6 +680,7 @@ void enc_attach(struct enc_context *ctx, unsigned int slot)
 /* Bring up an interface */
 _kernel_oserror *enc_init(struct enc_context *ctx)
 {
+	register volatile unsigned int *regs = ctx->regs;
 	unsigned int tmp, rx_tail, flow_hwm, flow_lwm, s;
 	_kernel_oserror *err;
 	DBGLOG(("EtherENC", 1, "init unit %d", ctx->dib.dib_unit));
@@ -680,24 +690,24 @@ _kernel_oserror *enc_init(struct enc_context *ctx)
 	enc_configure_phy(ctx);
 
 	/* Set up RX buffer between end of TX buffer and end of RAM */
-	ENC_WRITE_REG(ctx->regs, ERXST, RXBUF_BASE);
+	ENC_WRITE_REG(regs, ERXST, RXBUF_BASE);
 	rx_tail = RXBUF_END - 2;
-	ENC_WRITE_REG(ctx->regs, ERXTAIL, rx_tail);
+	ENC_WRITE_REG(regs, ERXTAIL, rx_tail);
 	ctx->rxptr = RXBUF_BASE;
 
 	/* Disable user-data pointers */
-	ENC_WRITE_REG(ctx->regs, EUDAST, 0xffff);
-	ENC_WRITE_REG(ctx->regs, EUDAND, 0xffff);
+	ENC_WRITE_REG(regs, EUDAST, 0xffff);
+	ENC_WRITE_REG(regs, EUDAND, 0xffff);
 
 	/* Disable 25MHz clock output */
-	ENC_CLEAR_BITS(ctx->regs, ECON2, ECON2_COCON_MASK);
+	ENC_CLEAR_BITS(regs, ECON2, ECON2_COCON_MASK);
 
 	/* Set up Link/Activity LEDs */
-	tmp = ENC_READ_REG(ctx->regs, EIDLED);
+	tmp = ENC_READ_REG(regs, EIDLED);
 	tmp &= ~(EIDLED_LACFG_MASK | EIDLED_LBCFG_MASK);
 	tmp |= (0x2 << EIDLED_LACFG_SHIFT) | /* LED A indicates link state */
 	       (0x6 << EIDLED_LBCFG_SHIFT); /* LED B indicates activity */
-	ENC_WRITE_REG(ctx->regs, EIDLED, tmp);
+	ENC_WRITE_REG(regs, EIDLED, tmp);
 
 	/* These flow control parameters are entirely derived out of thin air
 	 * and may need revising. Start asserting flow control at 3/4 full, and
@@ -706,14 +716,14 @@ _kernel_oserror *enc_init(struct enc_context *ctx)
 	flow_hwm = (RXBUF_LEN - (RXBUF_LEN / 4)) / 96;
 	flow_lwm = (RXBUF_LEN / 2) / 96;
 	tmp = (flow_hwm << ERXWM_RXFWM_SHIFT) | (flow_lwm << ERXWM_RXEWM_SHIFT);
-	ENC_WRITE_REG(ctx->regs, ERXWM, tmp);
+	ENC_WRITE_REG(regs, ERXWM, tmp);
 
 	DBGLOG(("EtherENC", 1, "unit %d hwaddr %02x:%02x:%02x:%02x:%02x:%02x",
 		ctx->dib.dib_unit, ctx->hwaddr[0], ctx->hwaddr[1],
 		ctx->hwaddr[2], ctx->hwaddr[3], ctx->hwaddr[4],
 		ctx->hwaddr[5]));
 
-	ENC_SET_BITS(ctx->regs, EIE,
+	ENC_SET_BITS(regs, EIE,
 		     EIE_INTIE | EIE_LINKIE | EIE_PKTIE | EIE_TXIE |
 			     EIE_TXABTIE | EIE_RXABTIE | EIE_PCFULIE);
 	s = irqs_off();
@@ -970,7 +980,8 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 {
 	/* irq_veneer0 puts the context pointer in r0 for us */
 	struct enc_context *ctx = (struct enc_context *)r->r[0];
-	unsigned int eir = ENC_READ_REG(ctx->regs, EIR);
+	register volatile unsigned int *regs = ctx->regs;
+	unsigned int eir = ENC_READ_REG(regs, EIR);
 	unsigned int pktcnt, i, s, s2;
 	DBGIRQ(1);
 #ifdef IRQDEBUG
@@ -978,12 +989,12 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 #endif
 	ctx->stats.irq_count += 1;
 	DBGLA(ctx->rom[0], DBG_IRQENTER);
-	ENC_CLEAR_BITS(ctx->regs, EIE, EIE_INTIE);
+	ENC_CLEAR_BITS(regs, EIE, EIE_INTIE);
 	s = irqs_on();
 
 	if (eir & EIR_LINKIF) {
 		/* Link state changed */
-		ENC_CLEAR_BITS(ctx->regs, EIR, EIR_LINKIF);
+		ENC_CLEAR_BITS(regs, EIR, EIR_LINKIF);
 		enc_link_update(ctx);
 	}
 
@@ -993,7 +1004,7 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 			ctx->stats.base.st_tx_general_errors += 1;
 			DBGLOG(("EtherENC", 1, "TX aborted"));
 		}
-		ENC_CLEAR_BITS(ctx->regs, EIR, EIR_TXIF | EIR_TXABTIF);
+		ENC_CLEAR_BITS(regs, EIR, EIR_TXIF | EIR_TXABTIF);
 		s2 = irqs_off();
 		ctx->flags &= ~ENC_TXBUSY;
 		irq_restore(s2);
@@ -1004,17 +1015,17 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 		/* Log dropped packet */
 		ctx->stats.base.st_dropped_frames += 1;
 		DBGLOG(("EtherENC", 1, "RX error, packet dropped"));
-		ENC_CLEAR_BITS(ctx->regs, EIR, EIR_RXABTIF | EIR_PCFULIF);
+		ENC_CLEAR_BITS(regs, EIR, EIR_RXABTIF | EIR_PCFULIF);
 	}
 
 	if (eir & EIR_PKTIF) {
 		/* Receive packet */
-		pktcnt = ENC_READ_REG(ctx->regs, ESTAT) & ESTAT_PKTCNT_MASK;
+		pktcnt = ENC_READ_REG(regs, ESTAT) & ESTAT_PKTCNT_MASK;
 		if (pktcnt > ctx->stats.rx_hwm)
 			ctx->stats.rx_hwm = pktcnt;
 		for (i = 0; i < pktcnt; i++) {
 			if (enc_rpkt(ctx) == 0) {
-				ENC_SET_BITS(ctx->regs, ECON1, ECON1_PKTDEC);
+				ENC_SET_BITS(regs, ECON1, ECON1_PKTDEC);
 			} else {
 				ctx->stats.base.st_link_status &= ~ST_STATUS_OK;
 				enc_shutdown(ctx);
@@ -1030,7 +1041,7 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 #endif
 
 	irq_restore(s);
-	ENC_SET_BITS(ctx->regs, EIE, EIE_INTIE);
+	ENC_SET_BITS(regs, EIE, EIE_INTIE);
 	DBGLA(ctx->rom[0], DBG_IRQLEAVE);
 	DBGIRQ(0);
 }
