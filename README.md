@@ -151,6 +151,14 @@ CERN Open Hardware License Version 2 - Strongly Reciprocal.
 The driver (everything in the `EtherENC` directory) is licensed under the GNU
 Public License Version 3, with the following exceptions:
 
+- `EtherENC.s.iocopy` contains code derived from the 
+  ["Ether1" driver](https://gitlab.riscosopen.org/RiscOS/Sources/Networking/Ethernet/Ether1/) 
+  as published by Risc OS Online Ltd., under the Apache License, version 2.0.
+
+- `EtherENC.h.filter` and `EtherENC.c.filter` contain code derived from the
+  ["EtherY" driver](https://gitlab.riscosopen.org/RiscOS/Sources/Networking/Ethernet/EtherY/)
+  as published by RISC OS Online Ltd., under the BSD License.
+
 - `EtherENC.h.syslog` and `EtherENC.s.syslog` are included unmodified from the
   SysLog freeware application (https://compton.nu/software/riscos/syslog).
 
