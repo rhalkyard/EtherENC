@@ -62,32 +62,34 @@ static void filter_eval(struct enc_context *ctx)
 		f = f->next;
 	}
 
-	st_rxstatus = ST_STATUS_DIRECT;
-
 	erxfcon = ERXFCON_CRCEN | ERXFCON_RUNTEN;
+	if (errorlevel == ERRLVL_ERRORS)
+		erxfcon |= ERXFCON_CRCEEN | ERXFCON_RUNTEEN;
+
+	st_rxstatus = 0;
 	switch (addresslevel) {
 	case ADDRLVL_PROMISCUOUS:
-		erxfcon |= ERXFCON_NOTMEEN;
-		st_rxstatus |= ST_STATUS_PROMISCUOUS;
-		/* Fall through */
+		erxfcon |= ERXFCON_NOTMEEN | ERXFCON_MCEN | ERXFCON_BCEN |
+			   ERXFCON_UCEN;
+		st_rxstatus = ST_STATUS_PROMISCUOUS;
+		break;
 	case ADDRLVL_MULTICAST:
-		erxfcon |= ERXFCON_MCEN;
-		st_rxstatus |= ST_STATUS_MULTICAST;
-		/* Fall through */
+		erxfcon |= ERXFCON_MCEN | ERXFCON_BCEN | ERXFCON_UCEN;
+		st_rxstatus = ST_STATUS_MULTICAST;
+		break;
 	case ADDRLVL_NORMAL:
-		erxfcon |= ERXFCON_BCEN;
-		st_rxstatus |= ST_STATUS_BROADCAST;
-		/* Fall through */
+		erxfcon |= ERXFCON_BCEN | ERXFCON_UCEN;
+		st_rxstatus = ST_STATUS_BROADCAST;
+		break;
 	case ADDRLVL_SPECIFIC:
 		erxfcon |= ERXFCON_UCEN;
-		st_rxstatus |= ST_STATUS_DIRECT;
-		/* Fall through */
+		st_rxstatus = ST_STATUS_DIRECT;
+		break;
 	}
 
 	ctx->addresslevel = addresslevel;
 	ctx->stats.base.st_link_status &= ~ST_STATUS_RXMASK;
 	ctx->stats.base.st_link_status |= st_rxstatus;
-
 	ENC_WRITE_REG(ctx->regs, ERXFCON, erxfcon);
 
 	/* Turn off reception if we don't have any filters to consume packets */

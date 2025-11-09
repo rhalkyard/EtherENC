@@ -209,8 +209,8 @@ static void enc_link_update(struct enc_context *ctx)
 	unsigned int spddpx =
 		(enc_read_phy_reg(ctx, PHSTAT3) & PHSTAT3_SPDDPX_MASK) >>
 		PHSTAT3_SPDDPX_SHIFT;
-	unsigned int polarity =
-		!!(enc_read_phy_reg(ctx, PHSTAT2) & PHSTAT2_PLRITY);
+	unsigned int phstat2_plrity = enc_read_phy_reg(ctx, PHSTAT2) &
+				      PHSTAT2_PLRITY;
 	unsigned int s, flags;
 	char *linkstate;
 	char *linkspeed;
@@ -258,9 +258,13 @@ static void enc_link_update(struct enc_context *ctx)
 	ctx->flags = flags;
 	irq_restore(s);
 
-	ctx->stats.base.st_link_polarity = polarity ?
-						   ST_LINK_POLARITY_CORRECT :
-						   ST_LINK_POLARITY_INCORRECT;
+	/* Link polarity can only be incorrect on 10mbit */
+	if (flags & ENC_100MB)
+		ctx->stats.base.st_link_polarity = ST_LINK_POLARITY_CORRECT;
+	else
+		ctx->stats.base.st_link_polarity =
+			phstat2_plrity ? ST_LINK_POLARITY_INCORRECT :
+					 ST_LINK_POLARITY_CORRECT;
 
 	/* Wait for flow control state machine to be idle before changing duplex
 	 * mode or flow control settings */
@@ -867,7 +871,7 @@ static int enc_rpkt(struct enc_context *ctx)
 	hdr.ether_header.ether_type = _NTOHS(hdr.ether_header.ether_type);
 
 	/* Sanity-check packet length and next-packet pointer. */
-	if (pktlen > ETHERMTU || pktlen < ETHERMIN || hdr.next >= RXBUF_END ||
+	if (pktlen > ETHERMTU || hdr.next >= RXBUF_END ||
 	    hdr.next < RXBUF_BASE) {
 		err = -1;
 		DBGLA(ctx->rom[0], DBG_RXERR);

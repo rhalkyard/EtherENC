@@ -37,7 +37,7 @@ static void print_filter(struct filter *f)
 
 	switch (framelevel) {
 	case FRMLVL_E2SPECIFIC:
-		printf("%04x ", frametype);
+		printf("Type %04x ", frametype);
 		break;
 	case FRMLVL_E2SINK:
 		printf("Sink ");
@@ -68,6 +68,15 @@ static void print_filter(struct filter *f)
 		break;
 	default:
 		printf("[Unknown addrlevel] ");
+		break;
+	}
+
+	switch (f->errorlevel) {
+	case ERRLVL_NO_ERRORS:
+		printf("No errors ");
+		break;
+	case ERRLVL_ERRORS:
+		printf("With errors");
 		break;
 	}
 
@@ -123,7 +132,7 @@ static void print_info(struct enc_context *ctx)
 	       (ctx->flags & ENC_RUNNING) ? "running" : "inactive");
 	printf("\tLink %s", (ctx->flags & ENC_LINKUP) ? "up" : "down");
 	if (ctx->flags & ENC_LINKUP) {
-		printf(", %sM, %s duplex %s\n",
+		printf(", %sM, %s duplex %s",
 		       (ctx->flags & ENC_100MB) ? "100" : "10",
 		       (ctx->flags & ENC_FULDPX) ? "Full" : "Half",
 		       (ctx->config & CONFIG_LINK_MANUAL) ? "(Manual)" :
@@ -134,10 +143,8 @@ static void print_info(struct enc_context *ctx)
 					       ST_LINK_POLARITY_CORRECT ?
 				       "correct" :
 				       "inverted");
-	} else {
-		printf("\n");
 	}
-	printf("\tReceive mode: ");
+	printf("\n\tReceive mode: ");
 	if (!(econ1 & ECON1_RXEN)) {
 		printf("off");
 	} else {
