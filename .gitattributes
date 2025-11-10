@@ -1,3 +1,13 @@
+# Acorn-style extensionless source code
 **/c/* linguist-language=c
+**/s/* linguist-language=assembly
 **/h/* linguist-language=c
+
+# AMU makefiles
 *,fe1 linguist-language=makefile
+
+# BBC Basic source
+*,ffb binary
+
+# WinCUPL expects CRLF line endings
+*.pld text eol=crlf linguist-language=cupl
