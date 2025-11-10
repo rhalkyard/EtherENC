@@ -17,8 +17,11 @@ PRINT "Press ESCAPE at any time to exit":PRINT
 
 PRINT "Installed Podules:":OSCLI "Podules":PRINT
 INPUT "Slot number",slot%
-SYS "Podule_HardwareAddress",,,,slot% TO ,,,slotbase%
-slotbase% = slotbase% AND &3F7C000
+REM SYS "Podule_HardwareAddress",,,,slot% TO ,,,slotbase%
+REM slotbase% = slotbase% AND &3F7C000
+REM SYS"Podule_HardwareAddresses",,,,slot% TO !pod
+slotbase%=&3340000 : REM 'fast' speed
+slotbase%+=&4000*slot%
 
 SYS "XOS_Module", 18, "EtherENC" TO result%
 IF result% = 18 THEN
@@ -303,5 +306,4 @@ REM Returns data in low byte of R0
 ]
 NEXT
 ENDPROC
-
 
