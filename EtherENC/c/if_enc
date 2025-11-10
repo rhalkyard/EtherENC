@@ -654,7 +654,7 @@ void enc_attach(struct enc_context *ctx, unsigned int slot)
 	ctx->regs = (unsigned int *)((baseaddr & SLOT_MASK_FAST) + ENC_REGBASE);
 	ctx->mem = (unsigned int *)(baseaddr & SLOT_MASK_MEMC);
 
-	ctx->if_snd.ifq_maxlen = IFQ_MAXLEN;
+	ctx->if_snd.ifq_maxlen = ENC_TXQ_LEN;
 
 	sprintf(ctx->location, "Expansion Slot %d", slot);
 
@@ -744,7 +744,7 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 {
 	int s;
 	struct ether_header *hdr;
-	struct mbuf *top, *tmp;
+	struct mbuf *top, *tmp = NULL;
 	_kernel_oserror *err = NULL;
 
 	if (!(ENC_READ_REG(ctx->regs, ESTAT) & ESTAT_PHYLNK)) {
@@ -768,7 +768,14 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 		tmp->m_len - MIN(tmp->m_len, 16));
 #endif
 
+	/* WEIRDNESS ALERT: mb is not just an mbuf chain, but potentially a list
+	 * of mbuf chains linked through mb->m_list. Each chain in the list
+	 * represents a separate payload to transmit using the same source,
+	 * destination, and frame type. This means that in event of an error, we
+	 * still have to make sure that *all* chains in the list are handled.
+	 */
 	while (mb) {
+		tmp = mb->m_list;
 		top = m_alloc_s(sizeof(struct ether_header), NULL);
 		if (!top) {
 			err = enc_error(ENOBUFS);
@@ -807,6 +814,7 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 			mb = m_ensure_safe(mb);
 
 		if (!mb) {
+			m_free(top);
 			err = enc_error(ENOBUFS);
 			s = irqs_off();
 			ctx->stats.base.st_tx_general_errors += 1;
@@ -816,27 +824,35 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 			DBGLA(ctx->rom[1], 1);
 			goto done;
 		}
-		mb->m_list = NULL;
 
+		/* Stick the header on top */
 		top = m_cat(top, mb);
 
+		/* Queue the packet on the interface. */
 		s = irqs_off();
 		if (IF_QFULL(&ctx->if_snd)) {
 			IF_DROP(&ctx->if_snd);
-			DBGLA(ctx->rom[0], DBG_TXERR);
-			DBGLA(ctx->rom[1], 2);
+			irq_restore(s);
 			m_freem(top);
-		} else {
-			IF_ENQUEUE(&ctx->if_snd, top);
-			if (ctx->if_snd.ifq_len > ctx->stats.tx_hwm)
-				ctx->stats.tx_hwm = ctx->if_snd.ifq_len;
+			err = enc_error(ENOSPC);
+			goto done;
 		}
+		IF_ENQUEUE(&ctx->if_snd, top);
+		if (ctx->if_snd.ifq_len > ctx->stats.tx_hwm)
+			ctx->stats.tx_hwm = ctx->if_snd.ifq_len;
 		irq_restore(s);
+		enc_start_tx(ctx);
 
-		mb = mb->m_list;
+		mb = tmp;
 	}
-	enc_start_tx(ctx);
 done:
+	/* Free any remaining mbuf chains */
+	mb = tmp;
+	while (mb) {
+		tmp = mb->m_list;
+		m_freem(mb);
+		mb = tmp;
+	}
 	return err;
 }
 

@@ -38,6 +38,14 @@
 
 #define ENC_MAX_UNITS 4
 
+/* Maximum number of packets to queue for transmission. A deep TX queue will
+ * lead to mbuf exhaustion, since packets are queued as mbuf chains, and
+ * queueing causes further mbuf allocation (for the header, and potentially a
+ * copy or ensure_safe operation on the payload). A full TX queue causes
+ * transmission to block until space is available.
+ */
+#define ENC_TXQ_LEN 8
+
 /* Bit fields for enc_context.flags */
 #define ENC_LINKUP (1 << 0)		/* Physical link is up */
 #define ENC_RUNNING (1 << 1)		/* Driver is running */
