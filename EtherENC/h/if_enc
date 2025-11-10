@@ -58,6 +58,8 @@ struct enc_stats {
 	struct stats base;
 	unsigned int tx_hwm;
 	unsigned int rx_hwm;
+	unsigned int rx_nombufs;
+	unsigned int tx_nombufs;
 	unsigned int irq_count;
 };
 

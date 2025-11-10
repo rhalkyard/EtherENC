@@ -49,6 +49,7 @@
 #define DBG_ION 0x0102
 #define DBG_TXSTART 0x0200
 #define DBG_TXDONE 0x0201
+#define DBG_TXERR 0x8202
 #define DBG_RXSTART 0x0300
 #define DBG_RXPROTO 0x0301
 #define DBG_RXDONE 0x0302

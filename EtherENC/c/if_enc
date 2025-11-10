@@ -772,6 +772,17 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 		top = m_alloc_s(sizeof(struct ether_header), NULL);
 		if (!top) {
 			err = enc_error(ENOBUFS);
+			s = irqs_off();
+			ctx->stats.base.st_tx_general_errors += 1;
+			ctx->stats.tx_nombufs += 1;
+			irq_restore(s);
+			DBGLA(ctx->rom[0], DBG_TXERR);
+			DBGLA(ctx->rom[1], 0);
+			DBGLA(ctx->rom[2], sizeof(struct ether_header));
+
+			if (!(flags & TX_PROTOSDATA))
+				m_freem(mb);
+
 			goto done;
 		}
 
@@ -797,6 +808,12 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 
 		if (!mb) {
 			err = enc_error(ENOBUFS);
+			s = irqs_off();
+			ctx->stats.base.st_tx_general_errors += 1;
+			ctx->stats.tx_nombufs += 1;
+			irq_restore(s);
+			DBGLA(ctx->rom[0], DBG_TXERR);
+			DBGLA(ctx->rom[1], 1);
 			goto done;
 		}
 		mb->m_list = NULL;
@@ -806,6 +823,8 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 		s = irqs_off();
 		if (IF_QFULL(&ctx->if_snd)) {
 			IF_DROP(&ctx->if_snd);
+			DBGLA(ctx->rom[0], DBG_TXERR);
+			DBGLA(ctx->rom[1], 2);
 			m_freem(top);
 		} else {
 			IF_ENQUEUE(&ctx->if_snd, top);
@@ -882,6 +901,7 @@ static int enc_rpkt(struct enc_context *ctx)
 		ctx->diag_data[0] = ctx->rxptr;
 		ctx->diag_data[1] = hdr.next;
 		ctx->diag_data[2] = pktlen;
+		ctx->stats.base.st_dropped_frames += 1;
 		goto errexit;
 	}
 
@@ -903,6 +923,12 @@ static int enc_rpkt(struct enc_context *ctx)
 			DBGLOG(("EtherENC", 1,
 				"out of mbufs trying to allocate %d bytes",
 				sizeof(RxHdr)));
+
+			DBGLA(ctx->rom[0], DBG_RXERR);
+			DBGLA(ctx->rom[1], 0);
+			DBGLA(ctx->rom[2], sizeof(RxHdr));
+			ctx->stats.base.st_dropped_frames += 1;
+			ctx->stats.rx_nombufs += 1;
 			goto done;
 		}
 
@@ -924,7 +950,12 @@ static int enc_rpkt(struct enc_context *ctx)
 			DBGLOG(("EtherENC", 1,
 				"out of mbufs trying to allocate %d bytes",
 				pktlen));
+			DBGLA(ctx->rom[0], DBG_RXERR);
+			DBGLA(ctx->rom[1], 1);
+			DBGLA(ctx->rom[2], pktlen);
 			m_free(top);
+			ctx->stats.base.st_dropped_frames += 1;
+			ctx->stats.rx_nombufs += 1;
 			goto done;
 		}
 		top = m_cat(top, m);

@@ -177,12 +177,15 @@ static void print_info(struct enc_context *ctx)
 	printf("\nTX bytes: %d\n", stats.base.st_tx_bytes);
 	printf("TX frames: %d\n", stats.base.st_tx_frames);
 	printf("TX errors: %d\n", stats.base.st_tx_general_errors);
+	printf("TX mbuf exhaustions: %d\n", stats.tx_nombufs);
+	printf("TX queue drops: %d\n", ctx->if_snd.ifq_drops);
 	printf("TX queue high water mark: %d\n", stats.tx_hwm);
 
 	printf("\nRX bytes: %d\n", stats.base.st_rx_bytes);
 	printf("RX frames: %d\n", stats.base.st_rx_frames);
-	printf("RX dropped frames: %d\n", stats.base.st_dropped_frames);
 	printf("RX unwanted frames: %d\n", stats.base.st_unwanted_frames);
+	printf("RX dropped frames: %d\n", stats.base.st_dropped_frames);
+	printf("RX mbuf exhaustions: %d\n", stats.rx_nombufs);
 	printf("RX queue high water mark: %d\n\n", stats.rx_hwm);
 
 	return;
