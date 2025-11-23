@@ -19,26 +19,16 @@
 #ifndef _debug_h
 #define _debug_h
 
-#if !defined(DEBUG) && \
-	(defined(TXDEBUG) || defined(RXDEBUG) || defined(IRQDEBUG))
-#define DEBUG
-#endif
-
 #ifdef DEBUG
 #define DBGLOG(x) xsyslogf x
 #define DBGDATA(logname, priority, data, size, offset) \
 	xsyslog_logdata(logname, priority, data, size, offset)
 #define DBGIRQ(mode) xsyslog_irqmode(mode)
-#define LADEBUG
+#define DBGLA(addr, data) (addr) = (data) | ((data) << 16)
 #else
 #define DBGLOG(x)
 #define DBGDATA(logname, priority, data, size, offset)
 #define DBGIRQ(mode)
-#endif
-
-#ifdef LADEBUG
-#define DBGLA(addr, data) (addr) = (data) | ((data) << 16)
-#else
 #define DBGLA(addr, data)
 #endif
 

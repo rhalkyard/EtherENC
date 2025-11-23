@@ -752,22 +752,6 @@ _kernel_oserror *enc_transmit(int flags, struct enc_context *ctx,
 		goto done;
 	}
 
-#ifdef TXDEBUG
-	DBGLOG(("EtherENC", 1, "Tx packet type=%04x flags-%x", frame_type,
-		flags));
-	DBGLOG(("EtherENC", 1, "Start of payload:"));
-	DBGDATA("EtherENC", 1, mtod(mb, unsigned char *), MIN(mb->m_len, 16),
-		0);
-
-	tmp = mb;
-	while (tmp->m_next)
-		tmp = tmp->m_next;
-
-	DBGLOG(("EtherENC", 1, "End of payload:"));
-	DBGDATA("EtherENC", 1, mtod(tmp, unsigned char *), MIN(tmp->m_len, 16),
-		tmp->m_len - MIN(tmp->m_len, 16));
-#endif
-
 	/* WEIRDNESS ALERT: mb is not just an mbuf chain, but potentially a list
 	 * of mbuf chains linked through mb->m_list. Each chain in the list
 	 * represents a separate payload to transmit using the same source,
@@ -921,19 +905,10 @@ static int enc_rpkt(struct enc_context *ctx)
 		goto errexit;
 	}
 
-#ifdef RXDEBUG
-	DBGLOG(("EtherENC", 1, "rx packet @%x length=%x next=%x rsv=%x type=%x",
-		rxptr, hdr.length, hdr.next, hdr.flags,
-		hdr.ether_header.ether_type));
-#endif
 	f = filter_lookup(ctx, &hdr);
 	if (f) {
 		/* Only bother to read the payload if a handler is interested in
 		 * it */
-#ifdef RXDEBUG
-		DBGLOG(("EtherENC", 1, "got handler %x pw=%x", f->handler,
-			f->pw));
-#endif
 		top = m_alloc_s(sizeof(RxHdr), NULL);
 		if (!top) {
 			DBGLOG(("EtherENC", 1,
@@ -955,11 +930,6 @@ static int enc_rpkt(struct enc_context *ctx)
 		memcpy(&rxh->rx_dst_addr, &hdr.ether_header.ether_dhost, 6);
 		rxh->rx_frame_type = hdr.ether_header.ether_type;
 		rxh->rx_error_level = (hdr.flags & RSV_OK) ? 0 : 1;
-
-#ifdef RXDEBUG
-		DBGLOG(("EtherENC", 1, "Header:"));
-		DBGDATA("EtherENC", 1, rxh, sizeof(RxHdr), 0);
-#endif
 
 		m = m_alloc(pktlen, NULL);
 		if (!m) {
@@ -987,15 +957,6 @@ static int enc_rpkt(struct enc_context *ctx)
 			rxptr = enc_rx_read(ctx, rxptr, data, thislen);
 			pktlen -= thislen;
 		}
-#ifdef RXDEBUG
-		DBGLOG(("EtherENC", 1, "Start of payload:"));
-		DBGDATA("EtherENC", 1, mtod(top->m_next, unsigned char *),
-			MIN(top->m_next->m_len, 16), 0);
-
-		DBGLOG(("EtherENC", 1, "End of payload:"));
-		DBGDATA("EtherENC", 1, mtod(m, unsigned char *),
-			MIN(m->m_len, 16), m->m_len - MIN(m->m_len, 16));
-#endif
 
 		ctx->stats.base.st_rx_frames += 1;
 		ctx->stats.base.st_rx_bytes += hdr.length;
@@ -1035,9 +996,7 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 	unsigned int eir = ENC_READ_REG(regs, EIR);
 	unsigned int pktcnt, i, s, s2;
 	DBGIRQ(1);
-#ifdef IRQDEBUG
-	DBGLOG(("EtherENC", 1, "Entered ISR"));
-#endif
+
 	ctx->stats.irq_count += 1;
 	DBGLA(ctx->rom[0], DBG_IRQENTER);
 	ENC_CLEAR_BITS(regs, EIE, EIE_INTIE);
@@ -1087,9 +1046,6 @@ _kernel_oserror *enc_isr(_kernel_swi_regs *r, void *pw)
 			}
 		}
 	}
-#ifdef IRQDEBUG
-	DBGLOG(("EtherENC", 1, "Finished ISR"));
-#endif
 
 	irq_restore(s);
 	ENC_SET_BITS(regs, EIE, EIE_INTIE);

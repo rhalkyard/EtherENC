@@ -1,9 +1,5 @@
-# Comment these two lines out to build a release build.
-# DEBUG		Basic debug logging
-# RXDEBUG	Verbose (and slow) receive debug logging
-# TXDEBUG	Verbose (and slow) transmit debug logging
-# LADEBUG	Make dummy writes to ROM for logic-analyser capture
-# DbgDefines = -DDEBUG -DRXDEBUG -DTXDEBUG -DLADEBUG
+# Uncomment these two lines to enable debug logging
+# DbgDefines = -DDEBUG
 # DbgObjects = @.o.syslog
 
 # Other options
@@ -26,8 +22,8 @@ Objects = 	@.o.ModuleHdr \
 		@.o.glue \
 		@.o.iocopy
 
-# Uncomment this line to generate generate assembled versions of C source
-# AsmCmd =	cc $(CCflags) -s -o @.c_s.$* @.c.$*
+# Uncomment this line to generate generate assembled versions of C source.
+# CCasm =	cc $(CCflags) -s -o @.c_s.$* @.c.$*
 
 all: @.EtherENC @.ENCRom $(asm)
 
@@ -45,15 +41,14 @@ clean:
 @.ENCRom: @.MkROM @.EtherENC
 	Run @.MkROM
 
-# User-editable dependencies:
-
 o.if_enc: h.ModuleHdr
 o.commands: h.ModuleHdr
 
 .SUFFIXES: .o .h .c .s .cmhg .c_s
+
 .c.o: o.ModuleHdr
 	cc $(CCflags) -o $@ @.c.$*
-	$(AsmCmd)
+	$(CCasm)
 
 .s.o:
 	ObjAsm $(ObjAsmflags) -o $@ @.s.$*
