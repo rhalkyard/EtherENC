@@ -172,7 +172,10 @@ Public License Version 3, with the following exceptions:
 
 Names and IDs registered with ROOL (see
 [https://www.riscosopen.org/content/allocate](https://www.riscosopen.org/content/allocate)
-for info). If you fork EtherENC and make software-incompatible changes, please 
+for info). If you fork EtherENC and make software-incompatible changes, please
+request your own allocations, as these are registered to me personally. However,
+if your EtherENC-derived hardware is fully compatible with the mainline EtherENC
+driver, you are welcome to use the same Podule IDs.
 
 | Allocation Type        | Allocation                                     | Source locations                                           |
 | ---------------------- | ---------------------------------------------- | ---------------------------------------------------------- |
